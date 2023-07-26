@@ -1,0 +1,8 @@
+# mmdebstrap has to create dpkg files and directories itself because dpkg only
+# started doing that itself with commit
+# 2896dae700d8aaff73b4a05f07c0c138a20c784c from 2020-01-20
+# mmdebstrap can stop doing this once dpkg with this feature is in
+# old-old-stable
+mmdebstrap: uses-dpkg-database-directly [usr/bin/mmdebstrap]
+mmdebstrap: uses-dpkg-database-directly [usr/share/mmdebstrap/hooks/eatmydata/customize.sh]
+mmdebstrap: uses-dpkg-database-directly [usr/share/mmdebstrap/hooks/eatmydata/extract.sh]

@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
+trap "rm -f /tmp/chrootless.tar /tmp/root.tar" EXIT INT TERM
+# we need --hook-dir=./hooks/merged-usr because usrmerge does not understand
+# DPKG_ROOT
+for INCLUDE in '' 'apt' 'apt,build-essential' 'systemd-sysv'; do
+	for MODE in root chrootless; do
+		{{ CMD }} --mode=$MODE --variant={{ VARIANT }} --hook-dir=./hooks/merged-usr \
+			${INCLUDE:+--include="$INCLUDE"} \
+			{{ DIST }} "/tmp/$MODE.tar" {{ MIRROR }}
+	done
+	cmp /tmp/root.tar /tmp/chrootless.tar || diffoscope /tmp/root.tar /tmp/chrootless.tar
+	rm /tmp/chrootless.tar /tmp/root.tar
+done

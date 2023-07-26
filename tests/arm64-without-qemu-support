@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+if [ ! -e /mmdebstrap-testenv ]; then
+	echo "this test modifies the system and should only be run inside a container" >&2
+	exit 1
+fi
+apt-get remove --yes qemu-user-static binfmt-support qemu-user
+# the following is not necessary anymore since systemd-binfmt
+# successfully disables support upon removal of qemu-user with
+# the upload of src:systemd 251.2-4: https://bugs.debian.org/1012163
+#echo 0 > /proc/sys/fs/binfmt_misc/qemu-aarch64
+ret=0
+{{ CMD }} --mode={{ MODE }} --variant=apt --architectures=arm64 {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }} || ret=$?
+if [ "$ret" = 0 ]; then
+	echo expected failure but got exit $ret >&2
+	exit 1
+fi

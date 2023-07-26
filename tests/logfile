@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+
+trap "rm -rf /tmp/debian-chroot /tmp/log /tmp/trimmed" EXIT INT TERM
+
+# we check the full log to also prevent debug printfs to accidentally make it into a commit
+{{ CMD }} --mode=root --variant=apt --logfile=/tmp/log {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+# omit the last line which should contain the runtime
+head --lines=-1 /tmp/log > /tmp/trimmed
+cat << LOG | diff -u - /tmp/trimmed
+I: chroot architecture {{ HOSTARCH }} is equal to the host's architecture
+I: finding correct signed-by value...
+I: automatically chosen format: directory
+I: running apt-get update...
+I: downloading packages with apt...
+I: extracting archives...
+I: installing essential packages...
+I: cleaning package lists and apt cache...
+LOG
+tail --lines=1 /tmp/log | grep '^I: success in .* seconds$'
+tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort | diff -u tar1.txt -

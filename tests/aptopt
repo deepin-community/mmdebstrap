@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+trap "rm -rf /tmp/debian-chroot; rm -f /tmp/config" EXIT INT TERM
+echo 'Acquire::Languages "none";' > /tmp/config
+{{ CMD }} --mode=root --variant=apt --aptopt='Acquire::Check-Valid-Until "false"' --aptopt=/tmp/config {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+printf 'Acquire::Check-Valid-Until "false";\nAcquire::Languages "none";\n' | cmp /tmp/debian-chroot/etc/apt/apt.conf.d/99mmdebstrap -
+rm /tmp/debian-chroot/etc/apt/apt.conf.d/99mmdebstrap
+tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort | diff -u tar1.txt -

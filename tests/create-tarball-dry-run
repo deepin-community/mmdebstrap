@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# we are testing all variants here because with 0.7.5 we had a bug:
+# mmdebstrap sid /dev/null --simulate ==> E: cannot read /var/cache/apt/archives/
+
+set -eu
+export LC_ALL=C.UTF-8
+prefix=
+include=,
+if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != root ] && [ "{{ MODE }}" != auto ]; then
+	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+		if [ ! -e /mmdebstrap-testenv ]; then
+			echo "this test modifies the system and should only be run inside a container" >&2
+			exit 1
+		fi
+		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+	fi
+	prefix="runuser -u ${SUDO_USER:-user} --"
+	if [ "{{ VARIANT }}" = extract ] || [ "{{ VARIANT }}" = custom ]; then
+		include="$(tr '\n' ',' < pkglist.txt)"
+	fi
+fi
+$prefix {{ CMD }} --mode={{ MODE }} --include="$include" --dry-run --variant={{ VARIANT }} {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+if [ -e /tmp/debian-chroot.tar ]; then
+	echo "/tmp/debian-chroot.tar must not be created with --dry-run" >&2
+	exit 1
+fi

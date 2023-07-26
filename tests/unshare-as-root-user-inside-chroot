@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# Before running unshare mode as root, we run "unshare --mount" but that fails
+# if mmdebstrap itself is executed from within a chroot:
+# unshare: cannot change root filesystem propagation: Invalid argument
+# This test tests the workaround in mmdebstrap using --propagation unchanged
+
+set -eu
+export LC_ALL=C.UTF-8
+[ "$(whoami)" = "root" ]
+trap "rm -f /tmp/debian-chroot.tar script.sh" EXIT INT TERM
+cat << 'SCRIPT' > script.sh
+#!/bin/sh
+set -eu
+rootfs="$1"
+mkdir -p "$rootfs/mnt"
+[ -e /usr/bin/mmdebstrap ] && cp -aT /usr/bin/mmdebstrap "$rootfs/usr/bin/mmdebstrap"
+[ -e ./mmdebstrap ] && cp -aT ./mmdebstrap "$rootfs/mnt/mmdebstrap"
+chroot "$rootfs" env --chdir=/mnt \
+	{{ CMD }} --mode=unshare --variant=apt \
+	{{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+SCRIPT
+chmod +x script.sh
+{{ CMD }} --mode=root --variant=apt --include=perl,mount \
+	--customize-hook=./script.sh \
+	--customize-hook="download /tmp/debian-chroot.tar /tmp/debian-chroot.tar" \
+	{{ DIST }} /dev/null {{ MIRROR }}
+tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

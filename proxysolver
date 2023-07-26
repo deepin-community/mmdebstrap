@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+#
+# This script is in the public domain
+#
+# Author: Johannes Schauer Marin Rodrigues <josch@mister-muffin.de>
+#
+# thin layer around /usr/lib/apt/solvers/apt, so that we can capture the solver
+# result
+#
+# we set Debug::EDSP::WriteSolution=yes so that Install stanzas also come with
+# Package and Version fields. That way, we do not also have to parse the EDSP
+# request and spend time matching ID numbers
+
+import subprocess
+import sys
+import os
+import getpass
+
+if not os.path.exists("/usr/lib/apt/solvers/apt"):
+    print(
+        """Error: ERR_NO_SOLVER
+Message: The external apt solver doesn't exist. You must install the apt-utils package.
+"""
+    )
+    exit()
+
+fname = os.environ.get("APT_EDSP_DUMP_FILENAME")
+if fname is None:
+    print(
+        """Error: ERR_NO_FILENAME
+Message: You have to set the environment variable APT_EDSP_DUMP_FILENAME
+ to a valid filename to store the dump of EDSP solver input in.
+ For example with: export APT_EDSP_DUMP_FILENAME=/tmp/dump.edsp
+"""
+    )
+    exit()
+
+try:
+    with open(fname, "w") as f:
+        with subprocess.Popen(
+            ["/usr/lib/apt/solvers/apt", "-oDebug::EDSP::WriteSolution=yes"],
+            stdin=sys.stdin.fileno(),
+            stdout=subprocess.PIPE,
+            bufsize=0,  # unbuffered
+            text=True,  # open in text mode
+        ) as p:
+            for line in p.stdout:
+                print(line, end="")
+                f.write(line)
+except (FileNotFoundError, PermissionError) as e:
+    print(
+        """Error: ERR_CREATE_FILE
+Message: Writing EDSP solver input to file '%s' failed as it couldn't be created!
+"""
+        % fname
+    )

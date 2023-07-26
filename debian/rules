@@ -1,4 +1,28 @@
 #!/usr/bin/make -f
 
+# for DEB_VERSION_UPSTREAM
+include /usr/share/dpkg/pkg-info.mk
+
 %:
 	dh $@
+
+override_dh_installman:
+	pod2man debian/tmp/usr/bin/mmdebstrap > ./mmdebstrap.1
+	help2man --no-info --name "filter a tarball like dpkg does" --version-string="$(DEB_VERSION_UPSTREAM)" debian/tmp/usr/bin/mmtarfilter > ./mmtarfilter.1
+	dh_installman ./mmdebstrap.1 ./mmtarfilter.1
+	rm ./mmdebstrap.1 ./mmtarfilter.1
+
+# override dh_install instead of using debian/mmdebstrap.install because
+# dh_install cannot rename files and dh-exec cannot copy directories
+override_dh_install:
+	mkdir -p debian/tmp/usr/bin
+	cp -a mmdebstrap debian/tmp/usr/bin/mmdebstrap
+	cp -a tarfilter debian/tmp/usr/bin/mmtarfilter
+	mkdir -p debian/tmp/usr/lib/apt/solvers
+	cp -a proxysolver debian/tmp/usr/lib/apt/solvers/mmdebstrap-dump-solution
+	mkdir -p debian/tmp/usr/share/mmdebstrap
+	cp -a hooks debian/tmp/usr/share/mmdebstrap
+	mkdir -p debian/tmp/usr/libexec/mmdebstrap
+	cp -a gpgvnoexpkeysig debian/tmp/usr/libexec/mmdebstrap
+	cp -a ldconfig.fakechroot debian/tmp/usr/libexec/mmdebstrap
+	dh_install

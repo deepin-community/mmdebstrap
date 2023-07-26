@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+trap "rm -rf /tmp/debian-chroot" EXIT INT TERM
+{{ CMD }} --mode={{ MODE }} --variant=apt --components="main main" --comp="main,main" {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+echo "deb {{ MIRROR }} {{ DIST }} main" | cmp /tmp/debian-chroot/etc/apt/sources.list
+tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort | diff -u tar1.txt -

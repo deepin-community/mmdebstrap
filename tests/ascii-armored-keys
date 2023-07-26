@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+if [ ! -e /mmdebstrap-testenv ]; then
+	echo "this test modifies the system and should only be run inside a container" >&2
+	exit 1
+fi
+for f in /etc/apt/trusted.gpg.d/*.gpg /etc/apt/trusted.gpg.d/*.asc; do
+	[ -e "$f" ] || continue
+	rm "$f"
+done
+rmdir /etc/apt/trusted.gpg.d
+mkdir /etc/apt/trusted.gpg.d
+for f in /usr/share/keyrings/*.gpg; do
+	name=$(basename "$f" .gpg)
+	gpg --enarmor < "/usr/share/keyrings/$name.gpg" \
+		| sed 's/ PGP ARMORED FILE/ PGP PUBLIC KEY BLOCK/;/^Comment: /d' \
+		> "/etc/apt/trusted.gpg.d/$name.asc"
+	rm "/usr/share/keyrings/$name.gpg"
+done
+{{ CMD }} --mode=root --variant=apt {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -
+rm -r /tmp/debian-chroot.tar

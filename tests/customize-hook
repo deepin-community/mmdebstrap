@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+trap "rm -rf /tmp/debian-chroot; rm -f /tmp/customize.sh" EXIT INT TERM
+cat << 'SCRIPT' > /tmp/customize.sh
+#!/bin/sh
+chroot "$1" whoami > "$1/output2"
+chroot "$1" pwd >> "$1/output2"
+SCRIPT
+chmod +x /tmp/customize.sh
+{{ CMD }} --mode=root --variant=apt --customize-hook='chroot "$1" sh -c "whoami; pwd" > "$1/output1"' --customize-hook=/tmp/customize.sh {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+printf "root\n/\n" | cmp /tmp/debian-chroot/output1
+printf "root\n/\n" | cmp /tmp/debian-chroot/output2
+rm /tmp/debian-chroot/output1
+rm /tmp/debian-chroot/output2
+tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort | diff -u tar1.txt -

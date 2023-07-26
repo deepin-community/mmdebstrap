@@ -1,0 +1,149 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+
+if [ {{ MODE }} != unshare ] && [ {{ MODE }} != root ]; then
+	echo "test requires root or unshare mode" >&2
+	exit 1
+fi
+
+prefix=
+if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
+	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+		if [ ! -e /mmdebstrap-testenv ]; then
+			echo "this test modifies the system and should only be run inside a container" >&2
+			exit 1
+		fi
+		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+	fi
+	prefix="runuser -u ${SUDO_USER:-user} --"
+fi
+
+# this mimics what apt does in apt-pkg/deb/dpkgpm.cc/pkgDPkgPM::StartPtyMagic()
+cat > /tmp/test.c << 'END'
+#define _GNU_SOURCE
+
+#include <stdlib.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/ioctl.h>
+#include <signal.h>
+
+int main() {
+	int ret;
+	int fd = posix_openpt(O_RDWR | O_NOCTTY);
+	if (fd < 0) {
+		perror("posix_openpt");
+		return 1;
+	}
+	char buf[64]; // 64 is used by apt
+	ret = ptsname_r(fd, buf, sizeof(buf));
+	if (ret != 0) {
+		perror("ptsname_r");
+		return 1;
+	}
+	ret = grantpt(fd);
+	if (ret == -1) {
+		perror("grantpt");
+		return 1;
+	}
+	struct termios origtt;
+	ret = tcgetattr(STDIN_FILENO, &origtt);
+	if (ret != 0) {
+		perror("tcgetattr1");
+		return 1;
+	}
+	struct termios tt;
+	ret = tcgetattr(STDOUT_FILENO, &tt);
+	if (ret != 0) {
+		perror("tcgetattr2");
+		return 1;
+	}
+	struct winsize win;
+	ret = ioctl(STDOUT_FILENO, TIOCGWINSZ, &win);
+	if (ret < 0) {
+		perror("ioctl stdout TIOCGWINSZ");
+		return 1;
+	}
+	ret = ioctl(fd, TIOCSWINSZ, &win);
+	if (ret < 0) {
+		perror("ioctl fd TIOCGWINSZ");
+		return 1;
+	}
+	ret = tcsetattr(fd, TCSANOW, &tt);
+	if (ret != 0) {
+		perror("tcsetattr1");
+		return 1;
+	}
+	cfmakeraw(&tt);
+	tt.c_lflag &= ~ECHO;
+	tt.c_lflag |= ISIG;
+	sigset_t sigmask;
+	sigset_t sigmask_old;
+	ret = sigemptyset(&sigmask);
+	if (ret != 0) {
+		perror("sigemptyset");
+		return 1;
+	}
+	ret = sigaddset(&sigmask, SIGTTOU);
+	if (ret != 0) {
+		perror("sigaddset");
+		return 1;
+	}
+	ret = sigprocmask(SIG_BLOCK,&sigmask, &sigmask_old);
+	if (ret != 0) {
+		perror("sigprocmask1");
+		return 1;
+	}
+	ret = tcsetattr(STDIN_FILENO, TCSAFLUSH, &tt);
+	if (ret != 0) {
+		perror("tcsetattr2");
+		return 1;
+	}
+	ret = sigprocmask(SIG_BLOCK,&sigmask_old, NULL);
+	if (ret != 0) {
+		perror("sigprocmask2");
+		return 1;
+	}
+	ret = tcsetattr(STDIN_FILENO, TCSAFLUSH, &origtt);
+	if (ret != 0) {
+		perror("tcsetattr3");
+		return 1;
+	}
+	return 0;
+}
+END
+
+# use script to create a fake tty
+# run all tests as root and as a normal user (the latter requires ptmxmode=666)
+script -qfec "$prefix {{ CMD }} --mode={{ MODE }} --variant=apt \
+	--include=gcc,libc6-dev,python3,passwd \
+	--customize-hook='chroot \"\$1\" useradd --home-dir /home/user --create-home user' \
+	--customize-hook='chroot \"\$1\" python3 -c \"import pty; print(pty.openpty())\"' \
+	--customize-hook='chroot \"\$1\" runuser -u user -- python3 -c \"import pty; print(pty.openpty())\"' \
+	--customize-hook='chroot \"\$1\" script -c \"echo foobar\"' \
+	--customize-hook='chroot \"\$1\" runuser -u user -- env --chdir=/home/user script -c \"echo foobar\"' \
+	--customize-hook='chroot \"\$1\" apt-get install --yes doc-debian 2>&1 | tee \"\$1\"/tmp/log' \
+	--customize-hook=\"copy-in /tmp/test.c /tmp\" \
+	--customize-hook='chroot \"\$1\" gcc /tmp/test.c -o /tmp/test' \
+	--customize-hook='chroot \"\$1\" /tmp/test' \
+	--customize-hook='chroot \"\$1\" runuser -u user -- /tmp/test' \
+	--customize-hook='rm \"\$1\"/tmp/test \"\$1\"/tmp/test.c' \
+	--customize-hook=\"copy-out /tmp/log /tmp\" \
+	{{ DIST }} /dev/null {{ MIRROR }}" /dev/null
+
+fail=0
+[ -r /tmp/log ] || fail=1
+grep '^E:' /tmp/log && fail=1
+grep 'Can not write log' /tmp/log && fail=1
+grep 'posix_openpt' /tmp/log && fail=1
+grep 'No such file or directory' /tmp/log && fail=1
+if [ $fail -eq 1 ]; then
+	echo "apt failed to write log:" >&2
+	cat /tmp/log >&2
+	exit 1
+fi
+
+rm /tmp/test.c /tmp/log

@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+# we redirect to /dev/null instead of using --quiet to not cause a broken pipe
+# when grep exits before mmdebstrap was able to write all its output
+{{ CMD }} --help | grep --fixed-strings 'mmdebstrap [OPTION...] [SUITE [TARGET [MIRROR...]]]' >/dev/null
