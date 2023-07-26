@@ -1,0 +1,136 @@
+Tests: testsuite
+Depends:
+ apt-cudf,
+ arch-test,
+ aspcud,
+ black,
+ debian-archive-keyring,
+ debootstrap (>= 1.0.128),
+ diffoscope,
+ dpkg-dev,
+ fakechroot,
+ fakeroot,
+ genext2fs,
+ gpg,
+ grep-dctrl,
+ libcap2-bin,
+ libperl-critic-perl,
+ mmdebstrap,
+ mount,
+ perl-doc,
+ perltidy,
+ python3,
+ python3-apt,
+ python3-debian,
+ shellcheck,
+ squashfs-tools-ng,
+ sudo,
+ uidmap,
+Restrictions: needs-root, allow-stderr, skippable
+
+# add a manual trigger on those packages that in the past broke this test
+#
+# 2022
+#
+#  - passwd #1004710
+#  - python3 #1010368, #1010366
+#  - man-db #1010957
+#  - libc-bin #1017590
+#  - cron #1012622, #1020603
+#  - kmod #1020605
+#  - ifupdown #1020604
+#  - procps #1020602
+#
+# 2023
+#
+#  - fakeroot #1030638, #1023286
+#  - debootstrap #1031222, #1031105
+#  - libgdbm-compat4 #1031276
+#  - tzdata #1031395
+#  - debian-archive-keyring #1019922
+#  - doc-debian #1035913
+#  - dash #989632
+#
+Features: test-name=hint-testsuite-triggers
+Test-Command: false
+Depends:
+ cron,
+ dash,
+ debian-archive-keyring,
+ debootstrap,
+ doc-debian,
+ fakeroot,
+ ifupdown,
+ kmod,
+ libc-bin,
+ libgdbm-compat4,
+ man-db,
+ passwd,
+ procps,
+ python3,
+ tzdata,
+Restrictions: hint-testsuite-triggers
+
+# FIXME: in an ideal world, debci would have enough computational resources
+#        to run this autopkgtest for all the packages in essential and
+#        build-essential and priority:standard that trigger it. But we are
+#        not there yet, so we must live with the situation that even if a
+#        package upload breaks the mmdebstrap autopkgtest, we will only notice
+#        either because another unrelated package triggers the autopkgtest
+#        or because this failed:
+#        https://jenkins.debian.net/job/mmdebstrap-jenkins-worker/
+## Using the hint-testsuite-triggers restriction we make all packages that are
+## put into the local archive by ./make_mirror.sh a trigger for the mmdebstrap
+## autopkgtest. This is essential, priority:required, priority:important,
+## priority:standard, build-essential, busybox, gpg, eatmydata, usr-is-merged
+## and usrmerge plus their dependency closure. The set is different depending
+## on the native architecture. Since we cannot depend on source packages and
+## to reduce the binary package set, only one binary package per source
+## package is listed here. If there are multiple choices, the binary packages
+## available on more architectures are preferred and then sorted by name.
+## Since library binary package names change frequently, this list has to be
+## updated regularly. Use the debian/compute_pkgset.py script to update the
+## list of dependencies.
+#Features: test-name=hint-testsuite-triggers
+#Test-Command: false
+#Depends: acl, adduser, anacron, apt, apt-listchanges, base-files, base-passwd,
+# bash, bash-completion, bc [ppc64el], bcron, bind9-dnsutils, binutils,
+# bsdextrautils, build-essential, busybox, bzip2, ca-certificates, cdebconf,
+# coreutils, cpio, cpp, cpp-12, cron, daemon, dash, dbus, dbus-broker, debconf,
+# debian-archive-keyring, debian-faq, debianutils, diffutils, distro-info-data,
+# dmidecode [amd64 arm64 armhf i386], dmsetup, doc-debian, dpkg, e2fsprogs,
+# eatmydata, file, findutils, gawk, gettext-base, gpg, gpgv1, grep, groff-base,
+# guile-3.0-libs, gzip, hostname, ifupdown, inetutils-telnet, init,
+# initscripts, insserv, install-info, iproute2, iputils-ping, isc-dhcp-client,
+# kmod, krb5-locales, less, libapparmor1, libargon2-1, libassuan0, libattr1,
+# libaudit-common, libbg2, libbpf1, libbrotli1, libbsd0, libc-bin, libcap-ng0,
+# libcap2, libcbor0.8, libcrypt-dev, libcryptsetup12, libcurl3-gnutls,
+# libdb5.3, libdebian-installer4, libedit2, libeinfo1, libelf1, libelogind0,
+# libexpat1, libffi8, libfido2-1, libfile-find-rule-perl, libfstrm0,
+# libfuse2 [s390x], libgc1, libgcrypt20, libgdbm-compat4, libgmp10,
+# libgnutls30, libgpg-error0, libhogweed6, libicu72, libidn2-0, libip4tc2,
+# libisl23, libjansson4, libjemalloc2, libjson-c5, libkeyutils1, libldap-2.5-0,
+# liblmdb0, liblocale-gettext-perl, liblockfile-bin, liblz4-1, liblzma5,
+# libmaxminddb0, libmd0, libmnl0, libmpc3, libmpfr6, libncursesw6, libnewt0.52,
+# libnftables1, libnftnl11, libnghttp2-14, libnsl-dev, libnss-systemd,
+# libnuma1 [ppc64el], libnumber-compare-perl, libp11-kit0, libpam-modules,
+# libpci3, libpcre2-8-0, libperl5.36, libpipeline1, libpopt0, libproc2-0,
+# libprotobuf-c1, libpsl5, libpython3-stdlib, libpython3.11-minimal,
+# libreadline8, librtas2 [ppc64el], librtmp1, libsasl2-2, libseccomp2,
+# libselinux1, libsemanage-common, libsepol2, libsigsegv2, libslang2,
+# libsqlite3-0, libssh2-1, libssl3, libtasn1-6, libtext-charwidth-perl,
+# libtext-glob-perl, libtext-iconv-perl, libtext-wrapi18n-perl, libtextwrap1,
+# libtirpc-common, libuchardet0, libunistring2, libuv1, libxml2, libxxhash0,
+# libzstd1, linux-libc-dev, login, logrotate, lsb-base, lsof, mailcap, make,
+# man-db, manpages, mawk, media-types, mime-support, nano, netbase,
+# netcat-traditional, openssh-client, opensysusers, original-awk, patch,
+# pci.ids, powerpc-ibm-utils [ppc64el], python-apt-common, python3-certifi,
+# python3-chardet, python3-charset-normalizer, python3-debian,
+# python3-debianbts, python3-httplib2, python3-idna, python3-pkg-resources,
+# python3-pycurl, python3-pyparsing, python3-pysimplesoap, python3-reportbug,
+# python3-requests, python3-six, python3-urllib3, rpcsvc-proto, runit-helper,
+# s390-tools [s390x], sed, sensible-utils, startpar,
+# sysconfig-hardware [s390x], systemd-cron, sysuser-helper, tar, tasksel,
+# traceroute, tzdata, ucf, ucspi-unix, usr-is-merged, vim-common, wamerican,
+# wget, zlib1g
+#Restrictions: hint-testsuite-triggers

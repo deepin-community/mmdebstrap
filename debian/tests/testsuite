@@ -1,0 +1,217 @@
+#!/bin/sh
+
+set -exu
+
+# dump information about the autopkgtest runner
+# print to stderr to prevent wrong interleaving with set -x output
+cat /etc/debian_version >&2
+env >&2
+nproc >&2
+apt-config dump >&2
+apt-cache policy >&2
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/* /etc/apt/preferences.d/*; do
+	[ -e "$f" ] || continue
+	echo "dumping contents of $f" >&2
+	cat "$f" >&2
+done
+
+# The mmdebstrap autopkgtest can take a very long time and it cannot be split
+# into multiple individual tests because they all rely on the existence of the
+# local package cache. We cannot re-generate this cache multiple times because
+# if a dinstall happens while this autopkgtest is running (not unlikely because
+# this test takes 2 hours easy) then the chroots might not be bit-by-bit
+# identical with each other anymore. Being independent of unfortunate Debian
+# mirror updates is one of the reasons the cache exists.
+#
+# By default (and this cannot be changed), a autopkgtest "test" is allowed to
+# last 10000 seconds or 2:46:40 hours. If this test takes too long, we return
+# exit code 77, marking it as "skipped".
+
+TIME_BEGIN=$(date +%s)
+
+# the archive with the highest priority where the base-files package comes from
+# determines whether we are on stable, testing or unstable
+DEFAULT_DIST=$(cat << END | python3 -
+import apt_pkg, sys
+apt_pkg.init()
+c = apt_pkg.Cache(None)
+d = apt_pkg.DepCache(c)
+s = apt_pkg.SourceList()
+s.read_main_list()
+
+highest_prio = -1
+highest_archive = None
+for pkgfile, _ in d.get_candidate_ver(c["base-files"]).file_list:
+	print("processing: %s"%pkgfile, file=sys.stderr)
+	index = s.find_index(pkgfile)
+	if index is None:
+		print("index is none -- skipping", file=sys.stderr)
+		continue
+	if not index.is_trusted:
+		print("index is not trusted -- skipping", file=sys.stderr)
+		continue
+	archive = pkgfile.archive
+	if archive not in ["stable", "testing", "unstable"]:
+		print("index archive %s is %s -- skipping"%(index, archive), file=sys.stderr)
+		continue
+	prio = d.policy.get_priority(pkgfile)
+	if prio > highest_prio:
+		highest_prio = prio
+		highest_archive = archive
+if highest_archive is None:
+	print("highest priority apt archive is neither stable, testing or unstable", file=sys.stderr)
+	for f in c.file_list:
+		print('========================', file=sys.stderr)
+		for a in ['architecture', 'archive', 'codename', 'component', 'filename', 'id', 'index_type', 'label', 'not_automatic', 'not_source', 'origin', 'site', 'size', 'version']:
+			print("%s: %s"%(a, getattr(f, a, None)), file=sys.stderr)
+		print("priority: ", d.policy.get_priority(f), file=sys.stderr)
+	exit(1)
+print("highest archive priority: %s"%highest_archive, file=sys.stderr)
+print(highest_archive)
+END
+)
+
+# On stable and testing we can run tests that require m-a:same packages to
+# exist in the same version across multiple architectures. Only on unstable we
+# disable this because packages in unstable are often out-of-sync.
+RUN_MA_SAME_TESTS=yes
+case $DEFAULT_DIST in
+	unstable)
+		RUN_MA_SAME_TESTS=no
+		;;
+	stable|testing)
+		# nothing to do
+		;;
+	*)
+		echo "unknown distribution $DEFAULT_DIST, must be one of stable, testing or unstable" >&2
+		;;
+esac
+
+SRC="$(pwd)"
+
+# change to temporary directory to not interfere with the source
+cd "$AUTOPKGTEST_TMP"
+
+# coverage.sh expects the scripts to be in the current directory
+# we copy make_mirror.sh instead of symlinking it because we are going to patch
+# it
+cp -a "$SRC/make_mirror.sh" make_mirror.sh
+ln -s "$SRC/run_qemu.sh" run_qemu.sh
+ln -s "$SRC/run_null.sh" run_null.sh
+cp -a "$SRC/hooks" .
+ln -s "$SRC/coverage.sh" coverage.sh
+ln -s "$SRC/gpgvnoexpkeysig" gpgvnoexpkeysig
+ln -s "$SRC/coverage.py" coverage.py
+ln -s "$SRC/coverage.txt" coverage.txt
+ln -s "$SRC/caching_proxy.py" caching_proxy.py
+cp -a "$SRC/tests" .
+
+# on Debian Salsa CI, $AUTOPKGTEST_NORMAL_USER is empty
+if [ -z "$AUTOPKGTEST_NORMAL_USER" ]; then
+	AUTOPKGTEST_NORMAL_USER=debci
+	useradd --create-home --groups sudo "$AUTOPKGTEST_NORMAL_USER"
+#	useradd --create-home --groups kvm "$AUTOPKGTEST_NORMAL_USER"
+#	ls -lha /dev/kvm || true
+#	lsmod | grep kvm || true
+else
+	adduser "$AUTOPKGTEST_NORMAL_USER" sudo
+#	adduser "$AUTOPKGTEST_NORMAL_USER" kvm
+fi
+
+mkdir ./shared
+chown "$AUTOPKGTEST_NORMAL_USER" ./shared
+
+echo "$AUTOPKGTEST_NORMAL_USER ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# we cannot use mini_httpd (or most other http servers) because they perform a
+# chdir() into the directory that is to be served on startup. But later on we
+# completely remove and replace that directory when creating the Debian mirror.
+# Thus we need a really stupid server which is able to cope with having its
+# www-root being replaced under its feet.
+#mini_httpd -D -h 127.0.0.1 -p 80 -u "$AUTOPKGTEST_NORMAL_USER" -T UTF-8 -dd "$AUTOPKGTEST_TMP/shared/cache" &
+python3 -m http.server --directory="$AUTOPKGTEST_TMP/shared/cache" --bind 127.0.0.1 80 2>/dev/null &
+HTTPD_PID=$!
+trap "kill $HTTPD_PID" INT QUIT TERM EXIT
+
+# create a fake mmdebstrap file in the current directory that coverage.sh can
+# copy
+cat << END > ./mmdebstrap
+#!/usr/bin/perl
+use strict;
+use warnings;
+exit(1)
+END
+
+# must not be used during testing -- installed version must be used instead
+cat << END > ./tarfilter
+#!/usr/bin/env python3
+exit(1)
+END
+
+# add entries to /etc/subuid and /etc/subgid if they don't exist yet
+if [ ! -e /etc/subuid ] || ! grep "$AUTOPKGTEST_NORMAL_USER" /etc/subuid; then
+	echo "$AUTOPKGTEST_NORMAL_USER:100000:65536" >> /etc/subuid
+fi
+if [ ! -e /etc/subgid ] || ! grep "$AUTOPKGTEST_NORMAL_USER" /etc/subgid; then
+	echo "$AUTOPKGTEST_NORMAL_USER:100000:65536" >> /etc/subgid
+fi
+
+ret=0
+timeout 50m runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD=mmdebstrap DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no USE_HOST_APT_CONFIG=yes "$SRC/make_mirror.sh" || ret=$?
+if [ "$ret" -ne 0 ]; then
+	echo "./make_mirror.sh failed" >&2
+	exit 77
+fi
+
+# subtract 10 seconds to account for the inaccuracy in measuring time
+TIMEOUT=$((10000-$(date +%s)+$TIME_BEGIN-10))
+
+# now run the script
+# we set CMD so that Devel::Cover is not used
+# HAVE_QEMU=no because there is no kvm kernel module
+# HAVE_BINFMT=no because there is no binfmt_misc kernel module
+ret=0
+timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap --setup-hook=$SRC/debian/tests/copy_host_apt_config --hook-dir=$SRC/hooks/file-mirror-automount" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no USE_HOST_APT_CONFIG=yes "$SRC/coverage.sh" --exitfirst || ret=$?
+if [ "$ret" -eq 124 ]; then
+	echo "command timed out after $TIMEOUT seconds" >&2
+	exit 77
+elif [ "$ret" -ne 0 ]; then
+	exit $ret
+fi
+
+# subtract 10 seconds to account for the inaccuracy in measuring time
+TIMEOUT=$((10000-$(date +%s)+$TIME_BEGIN-10))
+
+# exit successfully if there is not enough time left
+if [ "$TIMEOUT" -lt 3000 ]; then
+	echo "skipping remaining tests due to lack of remaining time" >&2
+	exit 0
+fi
+
+du -hs ./shared
+
+# force rebuilding the cache
+touch -d @0 shared/cache/debian/dists/unstable/InRelease
+
+ret=0
+timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD=mmdebstrap DEFAULT_DIST=$DEFAULT_DIST ONLY_HOSTARCH=yes RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no "$SRC/make_mirror.sh" || ret=$?
+if [ "$ret" -ne 0 ]; then
+	echo "./make_mirror.sh failed" >&2
+	exit 77
+fi
+
+# subtract 10 seconds to account for the inaccuracy in measuring time
+TIMEOUT=$((10000-$(date +%s)+$TIME_BEGIN-10))
+
+# run only those tests that were skipped because of USE_HOST_APT_CONFIG=yes but
+# ignore if any of them fails
+# failures here are irrelevant for transition testing because they cannot
+# respect the apt pinning options given by the test environment
+SKIPPED_TESTS=$(grep-dctrl --exact-match --field Needs-APT-Config true --no-field-names --show-field=Test < coverage.txt)
+# for tar1.txt also add create-directory test
+SKIPPED_TESTS="create-directory $SKIPPED_TESTS"
+timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no "$SRC/coverage.py" --exitfirst $SKIPPED_TESTS || exit 77
+
+du -hs ./shared
+
+exit 0

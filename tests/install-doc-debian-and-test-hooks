@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
+
+[ {{ VARIANT }} = "custom" ]
+[ {{ MODE }} = "chrootless" ]
+
+trap "rm -rf /tmp/debian-chroot" EXIT INT TERM
+
+prefix=
+if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
+	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+		if [ ! -e /mmdebstrap-testenv ]; then
+			echo "this test modifies the system and should only be run inside a container" >&2
+			exit 1
+		fi
+		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+	fi
+	prefix="runuser -u ${SUDO_USER:-user} --"
+fi
+
+$prefix {{ CMD }} --mode={{ MODE }} --skip=cleanup/tmp --variant={{ VARIANT }} --include=doc-debian --setup-hook='touch "$1/tmp/setup"' --customize-hook='touch "$1/tmp/customize"' {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+rm /tmp/debian-chroot/tmp/setup
+rm /tmp/debian-chroot/tmp/customize
+tar -C /tmp/debian-chroot --owner=0 --group=0 --numeric-owner --sort=name --clamp-mtime --mtime="$(date --utc --date=@{{ SOURCE_DATE_EPOCH }} --iso-8601=seconds)" -cf /tmp/debian-chroot.tar .
+tar tvf /tmp/debian-chroot.tar | grep -v ' ./dev' | diff -u doc-debian.tar.list -
+rm /tmp/debian-chroot.tar
+# delete contents of doc-debian
+rm /tmp/debian-chroot/usr/share/doc-base/doc-debian.debian-*
+rm -r /tmp/debian-chroot/usr/share/doc/debian
+rm -r /tmp/debian-chroot/usr/share/doc/doc-debian
+# delete real files
+rm /tmp/debian-chroot/etc/apt/sources.list
+rm /tmp/debian-chroot/etc/fstab
+rm /tmp/debian-chroot/etc/hostname
+rm /tmp/debian-chroot/etc/resolv.conf
+rm /tmp/debian-chroot/var/lib/dpkg/status
+rm /tmp/debian-chroot/var/lib/dpkg/arch
+rm /tmp/debian-chroot/var/cache/apt/archives/lock
+rm /tmp/debian-chroot/var/lib/dpkg/lock
+rm /tmp/debian-chroot/var/lib/dpkg/lock-frontend
+rm /tmp/debian-chroot/var/lib/apt/lists/lock
+## delete merged usr symlinks
+#rm /tmp/debian-chroot/libx32
+#rm /tmp/debian-chroot/lib64
+#rm /tmp/debian-chroot/lib32
+#rm /tmp/debian-chroot/sbin
+#rm /tmp/debian-chroot/bin
+#rm /tmp/debian-chroot/lib
+# in chrootless mode, there is more to remove
+rm /tmp/debian-chroot/var/lib/dpkg/triggers/Lock
+rm /tmp/debian-chroot/var/lib/dpkg/triggers/Unincorp
+rm /tmp/debian-chroot/var/lib/dpkg/status-old
+rm /tmp/debian-chroot/var/lib/dpkg/info/format
+rm /tmp/debian-chroot/var/lib/dpkg/info/doc-debian.md5sums
+rm /tmp/debian-chroot/var/lib/dpkg/info/doc-debian.list
+# the rest should be empty directories that we can rmdir recursively
+find /tmp/debian-chroot -depth -print0 | xargs -0 rmdir

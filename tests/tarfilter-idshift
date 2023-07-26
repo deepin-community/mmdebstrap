@@ -1,0 +1,58 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+if [ ! -e /mmdebstrap-testenv ]; then
+	echo "this test modifies the system and should only be run inside a container" >&2
+	exit 1
+fi
+trap "rm -f /tmp/debian-chroot.tar /tmp/debian-chroot-shifted.tar /tmp/debian-chroot.txt /tmp/debian-chroot-shiftedback.tar /tmp/expected; rm -rf /tmp/debian-chroot" EXIT INT TERM
+useradd --home-dir /home/user --create-home user
+echo user:100000:65536 | cmp /etc/subuid -
+echo user:100000:65536 | cmp /etc/subgid -
+# include iputils-ping so that we can verify that tarfilter does not remove
+# extended attributes
+# run through tarshift no-op to create a tarball that should be bit-by-bit
+# identical to a round trip through "tarfilter --idshift X" and "tarfilter --idshift -X"
+runuser -u user -- {{ CMD }} --mode=unshare --variant=apt --include=iputils-ping {{ DIST }} - {{ MIRROR }} \
+	| ./tarfilter --idshift 0 > /tmp/debian-chroot.tar
+# make sure that xattrs are set in the original tarball
+mkdir /tmp/debian-chroot
+tar --xattrs --xattrs-include='*' --directory /tmp/debian-chroot -xf /tmp/debian-chroot.tar ./usr/bin/ping
+echo "/tmp/debian-chroot/usr/bin/ping cap_net_raw=ep" > /tmp/expected
+getcap /tmp/debian-chroot/usr/bin/ping | diff -u /tmp/expected - >&2
+rm /tmp/debian-chroot/usr/bin/ping
+rmdir /tmp/debian-chroot/usr/bin
+rmdir /tmp/debian-chroot/usr
+rmdir /tmp/debian-chroot
+# shift the uid/gid forward by 100000 and backward by 100000
+./tarfilter --idshift 100000 < /tmp/debian-chroot.tar > /tmp/debian-chroot-shifted.tar
+./tarfilter --idshift -100000 < /tmp/debian-chroot-shifted.tar > /tmp/debian-chroot-shiftedback.tar
+# the tarball before and after the roundtrip through tarfilter should be bit
+# by bit identical
+cmp /tmp/debian-chroot.tar /tmp/debian-chroot-shiftedback.tar
+# manually adjust uid/gid and compare "tar -t" output
+tar --numeric-owner -tvf /tmp/debian-chroot.tar \
+	| sed 's# 42/0 # 100042/100000 #' \
+	| sed 's# 0/0 # 100000/100000 #' \
+	| sed 's# 0/5 # 100000/100005 #' \
+	| sed 's# 0/8 # 100000/100008 #' \
+	| sed 's# 0/42 # 100000/100042 #' \
+	| sed 's# 0/43 # 100000/100043 #' \
+	| sed 's# 0/50 # 100000/100050 #' \
+	| sed 's/ \+/ /g' \
+	> /tmp/debian-chroot.txt
+tar --numeric-owner -tvf /tmp/debian-chroot-shifted.tar \
+	| sed 's/ \+/ /g' \
+	| diff -u /tmp/debian-chroot.txt - >&2
+mkdir /tmp/debian-chroot
+tar --xattrs --xattrs-include='*' --directory /tmp/debian-chroot -xf /tmp/debian-chroot-shifted.tar
+echo "100000 100000" > /tmp/expected
+stat --format="%u %g" /tmp/debian-chroot/usr/bin/ping | diff -u /tmp/expected - >&2
+echo "/tmp/debian-chroot/usr/bin/ping cap_net_raw=ep" > /tmp/expected
+getcap /tmp/debian-chroot/usr/bin/ping | diff -u /tmp/expected - >&2
+echo "0 0" > /tmp/expected
+runuser -u user -- {{ CMD }} --unshare-helper /usr/sbin/chroot /tmp/debian-chroot stat --format="%u %g" /usr/bin/ping \
+	| diff -u /tmp/expected - >&2
+echo "/usr/bin/ping cap_net_raw=ep" > /tmp/expected
+runuser -u user -- {{ CMD }} --unshare-helper /usr/sbin/chroot /tmp/debian-chroot getcap /usr/bin/ping \
+	| diff -u /tmp/expected - >&2

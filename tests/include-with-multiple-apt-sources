@@ -1,0 +1,10 @@
+#!/bin/sh
+#
+# This checks for https://bugs.debian.org/976166
+# Since $DEFAULT_DIST varies, we hardcode stable and unstable.
+
+set -eu
+export LC_ALL=C.UTF-8
+trap "rm -rf /tmp/debian-chroot" EXIT INT TERM
+{{ CMD }} --mode=root --variant=minbase --include=doc-debian unstable /tmp/debian-chroot "deb {{ MIRROR }} unstable main" "deb {{ MIRROR }} stable main"
+chroot /tmp/debian-chroot dpkg-query --show doc-debian

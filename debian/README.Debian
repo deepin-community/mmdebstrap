@@ -1,0 +1,56 @@
+Recommends
+----------
+
+ arch-test            Building chroots for arches that cannot be executed on
+                      the current platform.
+
+ fakechroot, fakeroot For --mode=fakechroot.
+
+ gpg                  To figure out the right signed-by value for distributions
+                      that apt doesn't know the right keyring for.
+
+ libdistro-info-perl  To figure out whether a distro is EOL or not and to
+                      figure out which security mirror to use because Debian
+                      bullseye and later use suite-security instead of
+                      suite/updates.
+
+ libdpkg-perl         To find out keyring paths.
+
+ mount                Needed in cases mknod is not permitted and device nodes
+                      have to be bind-mounted instead. It is also needed in
+                      root and unshare mode to mount /sys and /proc but is not
+                      needed in fakechroot mode.
+
+ uidmap               For --mode=unshare.
+
+Suggests
+--------
+
+ apt-transport-tor    If using apt sources.list with tor+ (Tor network).
+
+ apt-utils            To have /usr/lib/apt/solvers/apt for the
+                      /usr/lib/apt/solvers/mmdebstrap-dump-solution executable.
+
+ binfmt-support       Chroots for architectures that cannot be executed by the
+                      host CPU unless in chrootless mode.
+
+ ca-certificates      If using apt sources.list with https.
+
+ debootstrap          For using /usr/share/debootstrap/scripts/ to infer distro
+                      names from the symlinks and
+                      /usr/share/debootstrap/scripts/gutsy to figure out the
+                      default mirror URL.
+
+ distro-info-data     To get better data about new distros or EOL distros.
+
+ dpkg-dev             For the dpkg-architecture binary to turn a Debian
+                      architecture into the DEB_HOST_MULTIARCH value.
+
+ genext2fs            For --format=ext2.
+
+ perl-doc             Generation of man page from source code with --help.
+
+ qemu-user-static     For cross platform builds such as building arm64 on
+                      amd64.
+
+ squashfs-tools-ng    For --format=squashfs.

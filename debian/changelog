@@ -1,5 +1,808 @@
-template-repository (1.0-1) unstable; urgency=medium
+mmdebstrap (1.3.7-2) unstable; urgency=medium
 
-  * Initial release
+  * debian/tests/control: remove copy-host-apt-config test
 
- -- Tsic404 <liuheng@deepin.org>  Sat, 28 Jan 2023 13:46:49 +0800
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 21 Jun 2023 13:03:31 +0200
+
+mmdebstrap (1.3.7-1) unstable; urgency=medium
+
+  * New upstream version 1.3.7
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 21 Jun 2023 07:57:57 +0200
+
+mmdebstrap (1.3.6-4) unstable; urgency=medium
+
+  * run copy-host-arch-config hook as an autopkgtest
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 17 Jun 2023 19:14:44 +0200
+
+mmdebstrap (1.3.6-3) unstable; urgency=medium
+
+  * cherry-pick hooks/copy-host-apt-config
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 17 Jun 2023 13:49:29 +0200
+
+mmdebstrap (1.3.6-2) unstable; urgency=medium
+
+  * debian/tests/control: require dash 0.5.12-4
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 17 Jun 2023 10:52:49 +0200
+
+mmdebstrap (1.3.6-1) unstable; urgency=medium
+
+  * New upstream version 1.3.6
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 16 Jun 2023 08:30:58 +0200
+
+mmdebstrap (1.3.5-7) unstable; urgency=medium
+
+  * work with doc-debian from unstable as well as from testing
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 25 May 2023 07:11:41 +0200
+
+mmdebstrap (1.3.5-6) unstable; urgency=medium
+
+  * tests/eatmydata-via-hook-dir: allow to work with dash with and without
+    diversions
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 24 May 2023 18:11:22 +0200
+
+mmdebstrap (1.3.5-5) unstable; urgency=medium
+
+  * tests/jessie-or-older: dash 0.5.12-3 dropped diversions
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 11 May 2023 14:53:04 +0200
+
+mmdebstrap (1.3.5-4) unstable; urgency=medium
+
+  * tests/eatmydata-via-hook-dir: dash 0.5.12-3 dropped diversions
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 11 May 2023 06:57:42 +0200
+
+mmdebstrap (1.3.5-3) unstable; urgency=medium
+
+  * fix regex in debian/tests/copy_host_apt_config to first remove
+    non-free-firmware and then non-free or otherwise components like
+    "main-firmware" will be the result
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 10 May 2023 22:41:17 +0200
+
+mmdebstrap (1.3.5-2) unstable; urgency=medium
+
+  * fix for doc-debian 11.0 changing the doc-base paths
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 06 May 2023 19:15:48 +0200
+
+mmdebstrap (1.3.5-1) unstable; urgency=medium
+
+  * New upstream version 1.3.5
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 20 Mar 2023 08:05:19 +0100
+
+mmdebstrap (1.3.4-1) unstable; urgency=medium
+
+  * New upstream version 1.3.4
+     - more safeguards before automatically choosing unshare mode (closes:
+       #1027429, #1032489)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 18 Mar 2023 00:33:00 +0100
+
+mmdebstrap (1.3.3-6.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Disable autopkgtest trigger on essential packages to reduce stress on
+    debci infrastructure.
+
+ -- Helmut Grohne <helmut@subdivi.de>  Thu, 09 Mar 2023 20:02:05 +0100
+
+mmdebstrap (1.3.3-6) unstable; urgency=medium
+
+  * add Needs-APT-Config to more tests
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 21 Feb 2023 07:19:51 +0100
+
+mmdebstrap (1.3.3-5) unstable; urgency=medium
+
+  * autopkgtest:
+     - replace deb.debian.org/debian with 127.0.0.1/debian
+     - filter out debian-debug, contrib, non-free, deb-src
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 20 Feb 2023 20:14:25 +0100
+
+mmdebstrap (1.3.3-4) unstable; urgency=medium
+
+  * try out another hack to fix the tzdata /etc/timezone situation
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 20 Feb 2023 07:33:04 +0100
+
+mmdebstrap (1.3.3-3) unstable; urgency=medium
+
+  * debian/tests/testsuite: do not manually install foreign fakeroot and
+    fakechroot
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 19 Feb 2023 23:57:19 +0100
+
+mmdebstrap (1.3.3-2) unstable; urgency=medium
+
+  * debian/tests/control: rely on tzdata creating /etc/timezone... again...
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 19 Feb 2023 19:42:11 +0100
+
+mmdebstrap (1.3.3-1) unstable; urgency=medium
+
+  * New upstream version 1.3.3 (only testsuite improvements)
+  * autopkgtest: take pinned packages into account via USE_HOST_APT_CONFIG=yes
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 19 Feb 2023 13:13:10 +0100
+
+mmdebstrap (1.3.2-1) unstable; urgency=medium
+
+  * new upstream release
+     - ldconfig.fakechroot doesn't ignore -r anymore (closes: #1029483)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 16 Feb 2023 10:56:26 +0100
+
+mmdebstrap (1.3.1-4) unstable; urgency=medium
+
+  * make autopkgtest work with black 23.1.0
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 14 Feb 2023 00:37:00 +0100
+
+mmdebstrap (1.3.1-3) unstable; urgency=medium
+
+  * adjust tests because tzdata does not create /etc/timezone anymore
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 10 Feb 2023 13:35:55 +0100
+
+mmdebstrap (1.3.1-2) unstable; urgency=medium
+
+  * remove references to apt-transport-https
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 20 Jan 2023 08:37:34 +0100
+
+mmdebstrap (1.3.1-1) unstable; urgency=medium
+
+  * new upstream release
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 20 Jan 2023 07:13:00 +0100
+
+mmdebstrap (1.3.0-1) unstable; urgency=medium
+
+  * new upstream release
+     - Do not split --include values again in run_download and run_install
+       (Closes: #1028977)
+  * add debian/patches/run_null.patch
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 16 Jan 2023 23:13:27 +0100
+
+mmdebstrap (1.2.5-1) unstable; urgency=medium
+
+  * new upstream release
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 04 Jan 2023 13:06:59 +0100
+
+mmdebstrap (1.2.4-1) unstable; urgency=medium
+
+  * new upstream release
+     - add jessie-or-older hook (closes: #1026765)
+  * debian/tests/testsuite: skip test immediately upon network failure
+  * compute autopkgtest triggers for all architectures
+  * add debian/patches/0001-make-shellcheck-0.9.0-1-happy.patch
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 23 Dec 2022 13:38:44 +0100
+
+mmdebstrap (1.2.3-2) unstable; urgency=medium
+
+  * debian/tests/control: use hint-testsuite-triggers to trigger the mmdebstrap
+    autopkgtest on all Essential:yes packages plus apt and usrmerge
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 12 Dec 2022 12:24:01 +0100
+
+mmdebstrap (1.2.3-1) unstable; urgency=medium
+
+  * new upstream release
+  * drop patches
+  * debian/tests/control: add dependency on shellcheck
+  * debian/tests/testsuite: also link coverage.sh and gpgvnoexpkeysig for
+    shellcheck
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 16 Nov 2022 20:03:13 +0100
+
+mmdebstrap (1.2.2-2) unstable; urgency=medium
+
+  * fix autopkgtest via patch
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 29 Oct 2022 05:16:20 +0200
+
+mmdebstrap (1.2.2-1) unstable; urgency=medium
+
+  * new upstream release
+  * write an empty /etc/machine-id instead of writing 'uninitialized' (Closes:
+    #1021478)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 27 Oct 2022 17:50:11 +0200
+
+mmdebstrap (1.2.1-2) unstable; urgency=medium
+
+  * debian/control: depend on python3 (>= 3.10) for the match syntax
+  * debian/mmdebstrap.install: sort
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 15 Sep 2022 15:46:53 +0200
+
+mmdebstrap (1.2.1-1) unstable; urgency=medium
+
+  * new upstream release
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 08 Sep 2022 04:45:40 +0200
+
+mmdebstrap (1.2.0-1) unstable; urgency=medium
+
+  * new upstream release
+     - fix mmdebstrap hanging if apt in download step failed (closes: #1017795)
+     - remove proot mode (closes: #1018957)
+  * fix autopkgtests (closes: #1017592)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 05 Sep 2022 07:48:37 +0200
+
+mmdebstrap (1.1.0-1) unstable; urgency=medium
+
+  * new upstream release
+     - relax regex for apt versions like 2.5.0devuan1 (closes: #1012630)
+  * debian/salsa-ci.yml: restore pipeline from salsa-ci-team
+  * debian/mmdebstrap.lintian-overrides: adjust overrides
+  * debian/tests/testsuite: bump timeout from 35m to 50m
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 26 Jul 2022 23:22:30 +0200
+
+mmdebstrap (1.0.1-1) unstable; urgency=medium
+
+  * new upstream release
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 29 May 2022 10:12:31 +0200
+
+mmdebstrap (1.0.0-1) unstable; urgency=medium
+
+  * new upstream release
+  * drop patches
+  * debian/tests/control: add dependency on python3-debian
+  * debian/tests/testsuite: copy over coverage.py, coverage.txt and tests
+    directory
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 28 May 2022 19:06:01 +0200
+
+mmdebstrap (0.8.6-2) unstable; urgency=medium
+
+  * debug s390x autopkgtest failure on ci.debian.net
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 04 Apr 2022 07:47:56 +0200
+
+mmdebstrap (0.8.6-1) unstable; urgency=medium
+
+  * new upstream release
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 25 Mar 2022 15:37:25 +0100
+
+mmdebstrap (0.8.5-1) unstable; urgency=medium
+
+  * new upstream release
+     - Run File::Find::find with no_chdir=>1 (closes: #1005857)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 08 Mar 2022 07:21:10 +0100
+
+mmdebstrap (0.8.4-1) unstable; urgency=medium
+
+  * new upstream release
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 11 Feb 2022 23:48:42 +0100
+
+mmdebstrap (0.8.3-1) unstable; urgency=medium
+
+  * new upstream release
+     - allow identifying a suite by codename again (closes: #1003191)
+  * debian/control: bump apt version constraint to 2.3.14
+  * debian/control: add libdpkg-perl to Recommends (closes: #1000823)
+  * debian/copyright: add disclaimer of warranty and limitation of liability
+    (closes: #1003237)
+  * add debian/README.Debian
+  * debian/copyright: fixup my name
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 08 Jan 2022 13:13:04 +0100
+
+mmdebstrap (0.8.2-1) unstable; urgency=medium
+
+  * new upstream release
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 15 Dec 2021 07:52:41 +0100
+
+mmdebstrap (0.8.1-1) unstable; urgency=medium
+
+  * new upstream release
+  * drop patches
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 07 Oct 2021 14:42:12 +0200
+
+mmdebstrap (0.8.0-5) unstable; urgency=medium
+
+  * add patch to run xz and zstd without --threads=0 to avoid ENOMEM errors
+    on systems with hundreds of cores (like debci uses)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 24 Sep 2021 22:14:02 +0200
+
+mmdebstrap (0.8.0-4) unstable; urgency=medium
+
+  * add patch for ldconfig.fakechroot to support DPKG_ROOT
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 23 Sep 2021 06:27:35 +0200
+
+mmdebstrap (0.8.0-3) unstable; urgency=medium
+
+  * add patch for bit-by-bit identical output in chrootless mode
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 22 Sep 2021 15:23:59 +0200
+
+mmdebstrap (0.8.0-2) unstable; urgency=medium
+
+  * fix autopkgtest
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 22 Sep 2021 09:11:34 +0200
+
+mmdebstrap (0.8.0-1) unstable; urgency=medium
+
+  * new upstream release
+     - document how to setup merged /usr via symlinks (closes: #914915)
+     - fix testsuite (closes: #983293)
+     - fix chrootless mode (closes: #983301)
+     - add mmtarfilter --pax-exclude (closes: #989487)
+     - fix busybox-based chroot example (closes: #989302)
+     - optimize /dev/null output (closes: #985830)
+     - use all cores when compressing with zstd (closes: #988271)
+     - move /usr/share/mmdebstrap/hooks/setup00-merged-usr.sh to
+       /usr/share/mmdebstrap/hooks/merged-usr/setup00.sh
+  * drop patches
+  * debian/rules: install gpgvnoexpkeysig and ldconfig.fakechroot
+  * debian/watch: fix for gitea
+  * debian/control: document dependencies
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 21 Sep 2021 18:44:07 +0200
+
+mmdebstrap (0.7.5-2.2) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Do not pass unsupported system attributes to tar2sqfs (Closes: #988100)
+
+ -- Benjamin Drung <benjamin.drung@ionos.com>  Fri, 07 May 2021 17:30:39 +0200
+
+mmdebstrap (0.7.5-2.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Pass extended attributes to tar2sqfs (Closes: #988100)
+
+ -- Benjamin Drung <benjamin.drung@ionos.com>  Thu, 06 May 2021 15:06:07 +0200
+
+mmdebstrap (0.7.5-2) unstable; urgency=medium
+
+  * add patch to call unshare with --propagation unchanged
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Fri, 19 Feb 2021 13:07:21 +0100
+
+mmdebstrap (0.7.5-1) unstable; urgency=medium
+
+  * new upstream release
+     - check/qemu is skipped for the extract variant (closes: #981709)
+  * drop patches
+  * add debian/mmdebstrap.examples
+  * debian/copyright: add Trent W. Buck
+  * debian/upstream/metadata: add Bug-Database and Bug-Submit fields
+  * debian/control: bump Standards-Version to 4.5.1
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sat, 06 Feb 2021 22:19:05 +0100
+
+mmdebstrap (0.7.4-1) unstable; urgency=medium
+
+  * new upstream release
+     - Optimize mmtarfilter to handle many path exclusions (closes: #978742)
+     - Do not run an additional env command inside the chroot (closes: #978733)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sat, 16 Jan 2021 14:28:29 +0100
+
+mmdebstrap (0.7.3-1) unstable; urgency=medium
+
+  * new upstream release
+     - don't ignore --include with multiple apt indices (closes: #976166)
+  * drop patches
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Wed, 02 Dec 2020 07:58:12 +0100
+
+mmdebstrap (0.7.2-3) unstable; urgency=medium
+
+  * Add more patches to make debci on i386 and armhf happy
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Mon, 30 Nov 2020 00:02:22 +0100
+
+mmdebstrap (0.7.2-2) unstable; urgency=medium
+
+  * Add two more patches from upstream to fix autopkgtest
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 29 Nov 2020 12:35:25 +0100
+
+mmdebstrap (0.7.2-1) unstable; urgency=medium
+
+  * new upstream release
+     - allow dropping deb archives into /var/cache/apt/archives
+       (closes: #971001)
+     - use packages from SUITE if multiple apt indices are configured
+       (closes: #972234)
+     - use libdistro-info-perl if available and fall back to distro-info-data
+       if available (closes: #972739)
+  * add patches from upstream:
+     - 0001-coverage.sh-test-using-mnt-requires-qemu.patch
+     - 0001-coverage.sh-fix-total-number-of-tests.patch
+     - 0001-name-solver-mmdebstrap-dump-solution-in-official-apt.patch
+  * create and install man pages for mmtarfilter and mmtaridshift, adding a
+    build-depends on help2man and python3
+  * add Recommends on libdistro-info-perl (see #972739)
+  * add Suggests on apt-utils (for /usr/lib/apt/solvers/apt)
+  * install mmdebstrap-dump-solution into /usr/lib/apt/solvers
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 29 Nov 2020 02:34:03 +0100
+
+mmdebstrap (0.7.1-3) unstable; urgency=medium
+
+  * add patch 0001-create-temporary-test-ext2-image-in-TMPDIR-and-not-i.patch
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 12 Nov 2020 15:51:37 +0100
+
+mmdebstrap (0.7.1-2) unstable; urgency=medium
+
+  * debian/tests/testsuite: make sure that HOSTARCH version of libfakeroot and
+    libfakechroot do not get removed when installing foreign architecture
+    versions
+  * add patch defining link_dir until debootstrap merge request 48 gets merged
+  * disable black until https://bugs.debian.org/970901 is fixed
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 04 Oct 2020 09:35:22 +0200
+
+mmdebstrap (0.7.1-1) unstable; urgency=medium
+
+  * new upstream release
+  * drop patches (all included upstream)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Fri, 18 Sep 2020 14:46:00 +0200
+
+mmdebstrap (0.7.0-1) unstable; urgency=medium
+
+  * new upstream release
+     - skip the emulation check in chrootless mode (closes: #956714)
+     - check whether arch-test is available (closes: #965129)
+     - hooks are documented (closes: #942761)
+  * drop existing patches and add new patches from upstream:
+     - 0001-coverage.sh-send-adios-to-hook-listener.patch
+     - 0002-coverage.sh-two-tests-need-qemu-isolation.patch
+  * Set upstream metadata fields: Repository
+  * rename debian/gitlab-ci.yml -> debian/salsa-ci.yml and disable blhc and
+    arch:any builds
+  * debian/control: add depends on python and suggests for debootstrap and
+    distro-info-data
+  * debian/control: bump dh compat to 13
+  * install taridshift, tarfilter and hooks
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Fri, 28 Aug 2020 16:05:26 +0200
+
+mmdebstrap (0.6.1-7) unstable; urgency=medium
+
+  * debian/tests/control: mark test as skippable (exit 77 will skip it)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 14 May 2020 22:46:37 +0200
+
+mmdebstrap (0.6.1-6) unstable; urgency=medium
+
+  * debian/tests/testsuite: add 20 minute timout and reduce number of retries
+    to 3
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sat, 11 Apr 2020 21:45:13 +0200
+
+mmdebstrap (0.6.1-5) unstable; urgency=medium
+
+  * add patch as workaround for squashfs-tools-ng/issues/42
+  * add Suggests for tor and https mirrors
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 09 Apr 2020 11:35:26 +0200
+
+mmdebstrap (0.6.1-4) unstable; urgency=medium
+
+  * since apt doesn't consider libgcc1 necessary (but debootstrap does) we
+    have to obtain it ourselves (see bug #953861)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 15 Mar 2020 14:03:23 +0100
+
+mmdebstrap (0.6.1-3) unstable; urgency=medium
+
+  * debootstrap changes got reverted -- deleting patch
+  * add patch to work around debootstrap ignoring versioned provides
+    see #953861
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 15 Mar 2020 11:28:06 +0100
+
+mmdebstrap (0.6.1-2) unstable; urgency=medium
+
+  * modify patch to make it also work with debootstrap 0.119 to
+    allow testing migration
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 12 Mar 2020 10:52:18 +0100
+
+mmdebstrap (0.6.1-1) unstable; urgency=medium
+
+  * new upstream release
+     - documentation about default variant fixed (closes: #949457)
+     - TMPDIR is not used by unshared process or by anything executed inside
+       the chroot (closes: #949584)
+     - support for deb822 sources (closes: #949354)
+     - one more example in manpage -- still commented out though
+       (closes: #951112)
+   * suggest squashfs-tools-ng (closes: #950200)
+   * run wrap-and-sort -asbt
+   * drop patches
+   * add patch working around debootstrap bug #953588 and debootstrap adding
+     security mirror to /etc/apt/sources.list -- also see #953592
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Wed, 11 Mar 2020 12:25:57 +0100
+
+mmdebstrap (0.6.0-4) unstable; urgency=medium
+
+  * mount /sys and /proc read-only in root-mode to make autopkgtest happy on
+    ppc64el
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Fri, 24 Jan 2020 09:46:08 +0100
+
+mmdebstrap (0.6.0-3) unstable; urgency=medium
+
+  * debian/tests/testsuite:
+     - use base-files package to determine the current archive
+     - pkgfile.archive should never raise AttributeError
+     - neutral exit when make_mirror fails too often
+  * debian/patches/autopkgtest: use variable hostarch in --logfile test
+  * bump debhelper compat to 12
+  * debian/control: add Rules-Requires-Root: no
+  * bump standards-version to 4.5.0
+  * override the uses-dpkg-database-directly lintian warning
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 23 Jan 2020 09:52:40 +0100
+
+mmdebstrap (0.6.0-2) unstable; urgency=medium
+
+  * fix autopkgtest on gitlab CI
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Mon, 20 Jan 2020 18:24:34 +0100
+
+mmdebstrap (0.6.0-1) unstable; urgency=medium
+
+  * new upstream release
+     - support running tests on non-amd64 architectures (closes: #948302)
+     - only attempt unlinking policy-rc.d if it exists (closes: #943323)
+     - add disclaimer of warranty and limitations of liability (closes: #944571)
+     - also remove apt sources that were given via /etc/apt/sources.list.d/
+       (closes: #944684)
+     - also install essential packages with /dev, /proc and /sys mounted
+       (closes: #945119)
+     - support for extended attributes (closes: #947012)
+     - clean any remaining files in /tmp in the chroot (closes: #947239)
+     - also clean /var/log/apt/eipp.log.xz (closes: #944677)
+     - add --keyring option (closes: #943325)
+     - run xz with --threads=0 (closes: #943327)
+     - add --dry-run option (closes: #948481)
+  * drop dependency on perl-doc because --help doesn't need it anymore (closes:
+    #944923)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 19 Jan 2020 22:53:49 +0100
+
+mmdebstrap (0.5.1-4) unstable; urgency=medium
+
+  * make busybox test less sensitive to changes in unstable (closes: #948159)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 05 Jan 2020 21:12:05 +0100
+
+mmdebstrap (0.5.1-3) unstable; urgency=medium
+
+  * add patch to fix busybox sub-essential test
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Mon, 16 Dec 2019 10:10:49 +0100
+
+mmdebstrap (0.5.1-2) unstable; urgency=medium
+
+  * add patch to fix /etc/shadow SOURCE_DATE_EPOCH workaround
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sat, 02 Nov 2019 23:32:32 +0100
+
+mmdebstrap (0.5.1-1) unstable; urgency=medium
+
+  * new upstream release
+     - allow apt to be already installed (closes: #942586)
+     - fix and improve --components (closes: #942588)
+  * drop patches
+  * autopkgtest: re-run ./make_mirror.sh if it should fail
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 20 Oct 2019 01:49:40 +0200
+
+mmdebstrap (0.5.0-2) unstable; urgency=medium
+
+  * debian/tests/testsuite: don't install foreign architecture packages if
+    RUN_MA_SAME_TESTS != yes
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 10 Oct 2019 09:10:21 +0200
+
+mmdebstrap (0.5.0-1) unstable; urgency=medium
+
+  * new upstream release
+     - rework CLI interface to use explicit "-" for stdin where ambiguous
+       instead of unconditionally reading stdin (closes: #934199)
+     - also create /var/lib/dpkg/arch in chrootless mode (closes: #935258)
+     - don't cleanup qemu-user in chrootless mode (closes: #935260)
+     - allow hooks to remove start-stop-daemon (closes: #940173)
+     - fix tarball permissions in chrootless mode (closes: #935266)
+     - only report binfmt_misc errors if needed (closes: #940162)
+  * run testsuite with distribution of the autopkgtest environment
+  * drop patches that were applied upstream
+  * apply two new patches to accommodate for salsa CI
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 06 Oct 2019 23:20:58 +0200
+
+mmdebstrap (0.4.1-8) unstable; urgency=medium
+
+  * Detect distro tests are run on in autopkgtest
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 03 Oct 2019 18:14:00 +0200
+
+mmdebstrap (0.4.1-7) unstable; urgency=medium
+
+  * Botched dgit commit
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 26 Sep 2019 14:16:00 +0200
+
+mmdebstrap (0.4.1-6) unstable; urgency=medium
+
+  * Print apt-cache policy during autopkgtest
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 26 Sep 2019 14:11:41 +0200
+
+mmdebstrap (0.4.1-5) unstable; urgency=medium
+
+  * Print environment variables during autopkgtest
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 25 Jul 2019 12:32:18 +0200
+
+mmdebstrap (0.4.1-4) unstable; urgency=medium
+
+  * Backport another patch from upstream:
+     - fix docs: fakechroot is tried before proot in auto mode (closes:
+       #929489)
+     - updates for release of Debian buster
+     - make_mirror.sh: security.d.o dropped the MD5sum field for SHA256 in
+       Packages.gz
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Thu, 25 Jul 2019 00:31:08 +0200
+
+mmdebstrap (0.4.1-3) unstable; urgency=medium
+
+  * Backport patches from upstream:
+     - cleanup auxfiles *after* running apt-get update (closes: #927151)
+     - chdir() before 'apt-get update' for apt (<< 1.5)
+     - chdir() before remove_tree()
+     - add Dir::State::Status to apt config for apt (<< 1.3)
+     - chmod 0755 on qemu-user-static binary for Ubuntu
+     - Only error out on W: and Err: lines (closes: #928079)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sat, 04 May 2019 23:48:19 +0200
+
+mmdebstrap (0.4.1-2) unstable; urgency=medium
+
+  * Mark autopkgtest as flaky (closes: #924854)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Mon, 18 Mar 2019 14:46:01 +0100
+
+mmdebstrap (0.4.1-1) unstable; urgency=medium
+
+  * new upstream release
+     - re-enable fakechroot testing (closes: #909637)
+     - disable apt sandboxing if necessary (closes: #923374)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Fri, 01 Mar 2019 14:53:42 +0100
+
+mmdebstrap (0.4.0-1) unstable; urgency=medium
+
+  * new upstream release (closes: #920332)
+     - cleanup /var/lib/apt/lists/auxfiles (closes: #916769)
+     - disable merged-usr (closes: #914915)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 24 Feb 2019 09:09:50 +0100
+
+mmdebstrap (0.3.0-10) unstable; urgency=medium
+
+  * add debian/gitlab-ci.yml
+  * autopkgtest: run without qemu-kvm, without unshare, without proot and
+    without binfmt because neither is supported on Salsa CI (Docker) nor on
+    Debian CI (LXC)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Wed, 05 Dec 2018 07:47:53 +0100
+
+mmdebstrap (0.3.0-9) unstable; urgency=medium
+
+  * kvm is not available on ci.debian.net
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Wed, 28 Nov 2018 09:08:41 +0100
+
+mmdebstrap (0.3.0-8) unstable; urgency=medium
+
+  * try enabling kvm
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Wed, 28 Nov 2018 00:53:36 +0100
+
+mmdebstrap (0.3.0-7) unstable; urgency=medium
+
+  * set XDG_RUNTIME_DIR in autopkgtest to /home/AUTOPKGTEST_NORMAL_USER/run
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Tue, 27 Nov 2018 08:21:53 +0100
+
+mmdebstrap (0.3.0-6) unstable; urgency=medium
+
+  * set XDG_RUNTIME_DIR in autopkgtest to AUTOPKGTEST_TMP
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Tue, 27 Nov 2018 00:28:55 +0100
+
+mmdebstrap (0.3.0-5) unstable; urgency=medium
+
+  * set XDG_RUNTIME_DIR in autopkgtest to /run/user/$(id -u ...)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Mon, 26 Nov 2018 08:35:03 +0100
+
+mmdebstrap (0.3.0-4) unstable; urgency=medium
+
+  * set XDG_RUNTIME_DIR in autopkgtest
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sun, 25 Nov 2018 23:59:27 +0100
+
+mmdebstrap (0.3.0-3) unstable; urgency=medium
+
+  * add libc6-dev to autopkgtest dependencies
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Sat, 24 Nov 2018 07:33:22 +0100
+
+mmdebstrap (0.3.0-2) unstable; urgency=medium
+
+  * add gcc to autopkgtest dependencies
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Fri, 23 Nov 2018 22:37:09 +0100
+
+mmdebstrap (0.3.0-1) unstable; urgency=medium
+
+  * new upstream version
+  * update autopkgtest
+  * add Recommends on fakeroot
+  * add Suggests on qemu-user, binfmt-support and dpkg-dev
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Fri, 23 Nov 2018 12:58:18 +0100
+
+mmdebstrap (0.2.0-1) unstable; urgency=medium
+
+  * new upstream version
+      - don't change permissions of bind mount targets and don't recursively
+        mount sysfs (closes: #909942)
+      - use data from standard input if no mirror is given and fix problem
+        with "deb"-style mirror lines (closes: #910044)
+  * add source package priority (closes: #909723)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Wed, 03 Oct 2018 10:48:50 +0200
+
+mmdebstrap (0.1.0-2) unstable; urgency=medium
+
+  * debian/control: add Vcs-Browser and Vcs-Git fields
+  * run wrap-and-sort -asbt
+  * add missing Depends on apt (closes: #909642)
+  * debian/control: add Recommends and Suggests
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Wed, 26 Sep 2018 21:33:17 +0200
+
+mmdebstrap (0.1.0-1) unstable; urgency=medium
+
+  * Initial release. (Closes: #909264)
+
+ -- Johannes 'josch' Schauer <josch@debian.org>  Mon, 24 Sep 2018 08:38:53 +0200

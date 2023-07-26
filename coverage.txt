@@ -1,0 +1,422 @@
+Test: debootstrap
+Dists: any
+Variants: minbase buildd -
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: check-against-debootstrap-dist
+Dists: any
+Variants: minbase buildd -
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: as-debootstrap-unshare-wrapper
+Modes: unshare
+Needs-Root: true
+Variants: minbase -
+Needs-APT-Config: true
+
+Test: help
+
+Test: man
+
+Test: version
+
+Test: create-directory
+Needs-Root: true
+
+Test: unshare-as-root-user
+Needs-Root: true
+
+Test: dist-using-codename
+Dists: any
+Needs-APT-Config: true
+
+Test: fail-without-etc-subuid
+Needs-QEMU: true
+
+Test: fail-without-username-in-etc-subuid
+Needs-QEMU: true
+
+Test: unshare-as-root-user-inside-chroot
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: root-mode-inside-chroot
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: root-mode-inside-unshare-chroot
+Modes: unshare
+Needs-APT-Config: true
+
+Test: root-without-cap-sys-admin
+Needs-Root: true
+
+Test: mount-is-missing
+Needs-QEMU: true
+
+Test: mmdebstrap
+Needs-Root: true
+Modes: root
+Formats: tar squashfs ext2
+Variants: essential apt minbase buildd - standard
+Skip-If:
+ variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
+ mode == "fakechroot" and variant in ["-", "standard"] # no extended attributes
+ variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+
+Test: check-for-bit-by-bit-identical-format-output
+Modes: unshare fakechroot
+Formats: tar squashfs ext2
+Variants: essential apt minbase buildd - standard
+Skip-If:
+ variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
+ mode == "fakechroot" and variant in ["-", "standard"] # no extended attributes
+ variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+
+Test: tarfilter-idshift
+Needs-QEMU: true
+
+Test: progress-bars-on-fake-tty
+
+Test: debug-output-on-fake-tty
+
+Test: existing-empty-directory
+Needs-Root: true
+
+Test: existing-directory-with-lost-found
+Needs-Root: true
+
+Test: fail-installing-to-non-empty-lost-found
+
+Test: fail-installing-to-non-empty-target-directory
+
+Test: missing-device-nodes-outside-the-chroot
+Needs-QEMU: true
+
+Test: missing-dev-sys-proc-inside-the-chroot
+Modes: unshare
+Variants: custom
+
+Test: chroot-directory-not-accessible-by-apt-user
+Needs-Root: true
+
+Test: cwd-directory-not-accessible-by-unshared-user
+Needs-Root: true
+Modes: unshare
+
+Test: create-gzip-compressed-tarball
+
+Test: custom-tmpdir
+Needs-Root: true
+Modes: unshare
+
+Test: xz-compressed-tarball
+
+Test: directory-ending-in-tar
+Modes: root
+Needs-Root: true
+
+Test: auto-mode-without-unshare-capabilities
+Needs-QEMU: true
+
+Test: fail-with-missing-lz4
+
+Test: fail-with-path-with-quotes
+
+Test: create-tarball-with-tmp-mounted-nodev
+Needs-QEMU: true
+
+Test: read-from-stdin-write-to-stdout
+
+Test: supply-components-manually
+Modes: root
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: stable-default-mirror
+Needs-QEMU: true
+
+Test: pass-distribution-but-implicitly-write-to-stdout
+Needs-QEMU: true
+
+Test: aspcud-apt-solver
+
+Test: mirror-is-stdin
+
+Test: copy-mirror
+Needs-QEMU: true
+
+Test: file-mirror
+Needs-QEMU: true
+
+Test: file-mirror-automount-hook
+Modes: root unshare fakechroot
+Needs-QEMU: true
+
+Test: mirror-is-deb
+
+Test: mirror-is-real-file
+Needs-APT-Config: true
+
+Test: deb822-1-2
+Modes: root
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: deb822-2-2
+Modes: root
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: automatic-mirror-from-suite
+Needs-QEMU: true
+
+Test: invalid-mirror
+Needs-APT-Config: true
+
+Test: fail-installing-to-root
+Modes: root
+Needs-Root: true
+
+Test: fail-installing-to-existing-file
+Modes: root
+Needs-Root: true
+
+Test: arm64-without-qemu-support
+Needs-QEMU: true
+Skip-If: hostarch != "amd64"
+
+Test: i386-which-can-be-executed-without-qemu
+Needs-QEMU: true
+Skip-If:
+ hostarch != "amd64"
+ not run_ma_same_tests
+
+Test: include-libmagic-mgc-arm64
+Needs-Root: true
+Needs-APT-Config: true
+Skip-If:
+ hostarch != "amd64"
+ not run_ma_same_tests
+
+Test: include-libmagic-mgc-arm64-with-multiple-arch-options
+Needs-Root: true
+Needs-APT-Config: true
+Skip-If:
+ hostarch != "amd64"
+ not run_ma_same_tests
+
+Test: aptopt
+Needs-Root: true
+
+Test: keyring
+Needs-QEMU: true
+
+Test: keyring-overwrites
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: signed-by-without-host-keys
+Needs-QEMU: true
+
+Test: ascii-armored-keys
+Needs-QEMU: true
+
+Test: signed-by-with-host-keys
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: dpkgopt
+Needs-Root: true
+
+Test: include
+Needs-Root: true
+
+Test: multiple-include
+Needs-Root: true
+
+Test: include-with-multiple-apt-sources
+Needs-Root: true
+
+Test: essential-hook
+Needs-Root: true
+
+Test: customize-hook
+Needs-Root: true
+
+Test: failing-customize-hook
+Needs-Root: true
+
+Test: sigint-during-customize-hook
+Needs-Root: true
+
+Test: hook-directory
+Needs-Root: true
+
+Test: eatmydata-via-hook-dir
+Needs-Root: true
+
+Test: special-hooks-using-helpers
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: special-hooks-using-helpers-and-env-vars
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: special-hooks-with-mode-mode
+Modes: root unshare fakechroot
+
+Test: debootstrap-no-op-options
+Needs-Root: true
+
+Test: verbose
+Variants: - standard
+Skip-If:
+ variant == "-" and hostarch not in ["armel", "armhf", "mipsel"] # #1031276
+ variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+
+Test: debug
+Variants: - standard
+Skip-If:
+ variant == "-" and hostarch not in ["armel", "armhf", "mipsel"] # #1031276
+ variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+
+Test: quiet
+Needs-Root: true
+
+Test: logfile
+Needs-Root: true
+Needs-APT-Config: true
+
+Test: without-etc-resolv-conf-and-etc-hostname
+Needs-QEMU: true
+
+Test: preserve-mode-of-etc-resolv-conf-and-etc-hostname
+Modes: root
+Needs-QEMU: true
+
+Test: not-having-to-install-apt-in-include-because-a-hook-did-it-before
+
+Test: remove-start-stop-daemon-and-policy-rc-d-in-hook
+
+Test: skip-start-stop-daemon-policy-rc
+
+Test: skip-mount
+Modes: unshare
+
+Test: compare-output-with-pre-seeded-var-cache-apt-archives
+Needs-QEMU: true
+Variants: any
+Skip-If:
+ variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
+
+Test: create-directory-dry-run
+Modes: root
+
+Test: create-tarball-dry-run
+Variants: any
+Modes: any
+
+Test: unpack-doc-debian
+Modes: root fakechroot
+Variants: extract
+Needs-APT-Config: true
+
+Test: install-doc-debian
+Modes: chrootless
+Variants: custom
+Needs-APT-Config: true
+
+Test: chrootless
+Variants: essential
+Modes: chrootless
+Needs-Root: true
+Skip-If:
+ dist == "oldstable"
+
+Test: chrootless-fakeroot
+Variants: essential
+Modes: chrootless
+Skip-If:
+ dist == "oldstable"
+ hostarch in ["i386", "armel", "armhf", "mipsel"] # #1023286
+
+Test: chrootless-foreign
+Variants: essential
+Modes: chrootless
+Skip-If:
+ dist == "oldstable"
+ hostarch not in ["amd64", "arm64"]
+ not run_ma_same_tests
+Needs-QEMU: true
+
+Test: install-doc-debian-and-output-tarball
+Variants: custom
+Modes: chrootless
+Needs-APT-Config: true
+
+Test: install-doc-debian-and-test-hooks
+Variants: custom
+Modes: chrootless
+Needs-APT-Config: true
+
+Test: install-libmagic-mgc-on-arm64
+Variants: custom
+Modes: chrootless
+Skip-If:
+ hostarch != "amd64"
+ not have_binfmt
+
+Test: install-busybox-based-sub-essential-system
+Needs-Root: true
+
+Test: create-arm64-tarball
+Modes: root unshare fakechroot
+Skip-If:
+ hostarch != "amd64"
+ mode == "fakechroot" and not run_ma_same_tests
+ not have_binfmt
+
+Test: no-sbin-in-path
+Modes: fakechroot
+
+Test: dev-ptmx
+Modes: root unshare
+
+Test: error-if-stdout-is-tty
+
+Test: variant-custom-timeout
+
+Test: include-deb-file
+Modes: root unshare fakechroot
+Needs-APT-Config: true
+
+Test: unshare-include-deb
+Modes: unshare
+
+Test: pivot_root
+Modes: root unshare
+Needs-APT-Config: true
+
+Test: jessie-or-older
+Needs-Root: true
+Modes: root unshare fakechroot
+Variants: essential apt minbase
+Skip-If: mode == "fakechroot" and hostarch in ["i386", "armel", "armhf", "mipsel"] # #1023286
+
+Test: apt-patterns
+
+Test: apt-patterns-custom
+
+Test: empty-sources.list
+
+Test: merged-fakechroot-inside-unmerged-chroot
+Needs-Root: true
+Needs-APT-Config: true
+Skip-If: hostarch in ["i386", "armel", "armhf", "mipsel"] # #1023286
+
+Test: auto-mode-as-normal-user
+Modes: auto

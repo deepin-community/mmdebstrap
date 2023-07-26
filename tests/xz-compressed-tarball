@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+trap "rm -f /tmp/debian-chroot.tar.xz" EXIT INT TERM
+{{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} /tmp/debian-chroot.tar.xz {{ MIRROR }}
+printf '\3757zXZ\0' | cmp --bytes=6 /tmp/debian-chroot.tar.xz -
+tar -tf /tmp/debian-chroot.tar.xz | sort | diff -u tar1.txt -

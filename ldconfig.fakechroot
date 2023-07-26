@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+#
+# This script is in the public domain
+#
+# Author: Johannes Schauer Marin Rodrigues <josch@mister-muffin.de>
+#
+# This is command substitution for ldconfig under fakechroot:
+#
+#     export FAKECHROOT_CMD_SUBST=/sbin/ldconfig=/path/to/ldconfig.fakechroot
+#
+# Statically linked binaries cannot work with fakechroot and thus have to be
+# replaced by either /bin/true or a more clever solution like this one. The
+# ldconfig command supports the -r option which allows passing a chroot
+# directory for ldconfig to work in. This can be used to run ldconfig without
+# fakechroot but still let it create /etc/ld.so.cache inside the chroot.
+#
+# Since absolute symlinks are broken without fakechroot to translate them,
+# we read /etc/ld.so.conf and turn all absolute symlink shared libraries into
+# relative ones. At program exit, the original state is restored.
+
+
+import os
+import sys
+import subprocess
+import atexit
+import glob
+from pathlib import Path
+
+symlinks = []
+
+
+def restore_symlinks():
+    for (link, target, atime, mtime) in symlinks:
+        link.unlink()
+        link.symlink_to(target)
+        os.utime(link, times=None, ns=(atime, mtime), follow_symlinks=False)
+
+
+atexit.register(restore_symlinks)
+
+
+def get_libdirs(chroot, configs):
+    res = []
+    for conf in configs:
+        for line in (Path(conf)).read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                continue
+            if line.startswith("include "):
+                assert line.startswith("include /")
+                res.extend(
+                    get_libdirs(chroot, chroot.glob(line.removeprefix("include /")))
+                )
+                continue
+            assert line.startswith("/"), line
+            line = line.lstrip("/")
+            if not (chroot / Path(line)).is_dir():
+                continue
+            for f in (chroot / Path(line)).iterdir():
+                if not f.is_symlink():
+                    continue
+                linktarget = f.readlink()
+                # make sure that the linktarget is an absolute path inside the
+                # chroot
+                if not str(linktarget).startswith("/"):
+                    continue
+                if chroot not in linktarget.parents:
+                    continue
+                # store original link so that we can restore it later
+                symlinks.append(
+                    (f, linktarget, f.lstat().st_atime_ns, f.lstat().st_mtime_ns)
+                )
+                # replace absolute symlink by relative link
+                relative = os.path.relpath(linktarget, f.parent)
+                f.unlink()
+                f.symlink_to(relative)
+    return res
+
+
+def main():
+    if "FAKECHROOT_BASE_ORIG" not in os.environ:
+        print("FAKECHROOT_BASE_ORIG is not set", file=sys.stderr)
+        print(
+            "must be executed under fakechroot using FAKECHROOT_CMD_SUBST",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    chroot = Path(os.environ["FAKECHROOT_BASE_ORIG"])
+
+    # if chrootless mode is used from within a fakechroot chroot, then
+    # FAKECHROOT_BASE_ORIG will point at the outer chroot. We want to use
+    # the path from DPKG_ROOT inside of that instead
+    if os.environ.get("DPKG_ROOT", "") not in ["", "/"]:
+        chroot /= os.environ["DPKG_ROOT"].lstrip("/")
+
+    if not (chroot / "sbin" / "ldconfig").exists():
+        sys.exit(0)
+
+    (chroot / "var" / "cache" / "ldconfig").mkdir(
+        mode=0o700, parents=True, exist_ok=True
+    )
+
+    for d in get_libdirs(chroot, [chroot / "etc" / "ld.so.conf"]):
+        make_relative(d)
+
+    rootarg = chroot
+    argv = sys.argv[1:]
+    for arg in sys.argv[1:]:
+        if arg == "-r":
+            rootarg = None
+        elif rootarg is None:
+            argpath = Path(arg)
+            if argpath.is_absolute():
+                rootarg = chroot / argpath.relative_to("/")
+            else:
+                rootarg = Path.cwd() / argpath
+    if rootarg is None:
+        rootarg = chroot
+
+    # we add any additional arguments before "-r" such that any other "-r"
+    # option will be overwritten by the one we set
+    subprocess.check_call(
+        [chroot / "sbin" / "ldconfig"] + sys.argv[1:] + ["-r", rootarg]
+    )
+
+
+if __name__ == "__main__":
+    main()

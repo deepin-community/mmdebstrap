@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+
+[ {{ VARIANT }} = "custom" ]
+[ {{ MODE }} = "chrootless" ]
+
+prefix=
+if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
+	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+		if [ ! -e /mmdebstrap-testenv ]; then
+			echo "this test modifies the system and should only be run inside a container" >&2
+			exit 1
+		fi
+		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+	fi
+	prefix="runuser -u ${SUDO_USER:-user} --"
+fi
+
+$prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} --architectures=arm64 --include=libmagic-mgc {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+# delete contents of libmagic-mgc
+rm /tmp/debian-chroot/usr/lib/file/magic.mgc
+rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/README.Debian
+rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/changelog.Debian.gz
+rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/changelog.gz
+rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/copyright
+rm /tmp/debian-chroot/usr/share/file/magic.mgc
+rm /tmp/debian-chroot/usr/share/misc/magic.mgc
+# delete real files
+rm /tmp/debian-chroot/etc/apt/sources.list
+rm /tmp/debian-chroot/etc/fstab
+rm /tmp/debian-chroot/etc/hostname
+rm /tmp/debian-chroot/etc/resolv.conf
+rm /tmp/debian-chroot/var/lib/dpkg/status
+rm /tmp/debian-chroot/var/cache/apt/archives/lock
+rm /tmp/debian-chroot/var/lib/dpkg/lock
+rm /tmp/debian-chroot/var/lib/dpkg/lock-frontend
+rm /tmp/debian-chroot/var/lib/apt/lists/lock
+## delete merged usr symlinks
+#rm /tmp/debian-chroot/libx32
+#rm /tmp/debian-chroot/lib64
+#rm /tmp/debian-chroot/lib32
+#rm /tmp/debian-chroot/sbin
+#rm /tmp/debian-chroot/bin
+#rm /tmp/debian-chroot/lib
+# in chrootless mode, there is more to remove
+rm /tmp/debian-chroot/var/lib/dpkg/arch
+rm /tmp/debian-chroot/var/lib/dpkg/triggers/Lock
+rm /tmp/debian-chroot/var/lib/dpkg/triggers/Unincorp
+rm /tmp/debian-chroot/var/lib/dpkg/status-old
+rm /tmp/debian-chroot/var/lib/dpkg/info/format
+rm /tmp/debian-chroot/var/lib/dpkg/info/libmagic-mgc.md5sums
+rm /tmp/debian-chroot/var/lib/dpkg/info/libmagic-mgc.list
+# the rest should be empty directories that we can rmdir recursively
+find /tmp/debian-chroot -depth -print0 | xargs -0 rmdir

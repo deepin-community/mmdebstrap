@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
+
+[ "$(id -u)" -eq 0 ]
+[ {{ MODE }} = "root" ]
+case {{ FORMAT }} in tar|squashfs|ext2) : ;; *) exit 1;; esac
+
+{{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} {{ DIST }} ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }} {{ MIRROR }}
+if [ "{{ FORMAT }}" = tar ]; then
+	printf 'ustar ' | cmp --bytes=6 --ignore-initial=257:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.tar -
+elif [ "{{ FORMAT }}" = squashfs ]; then
+	printf 'hsqs' | cmp --bytes=4 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.squashfs -
+elif [ "{{ FORMAT }}" = ext2 ]; then
+	printf '\123\357' | cmp --bytes=2 --ignore-initial=1080:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.ext2 -
+else
+	echo "unknown format: {{ FORMAT }}" >&2
+	exit 1
+fi

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
+
+tmpdir="$(mktemp -d)"
+chmod 755 "$tmpdir"
+debootstrap "$([ "{{ DIST }}" = oldstable ] && echo --no-merged-usr || echo --merged-usr)" --variant={{ VARIANT }} {{ DIST }} "$tmpdir" {{ MIRROR }}
+tar --sort=name --mtime=@$SOURCE_DATE_EPOCH --clamp-mtime --numeric-owner --one-file-system --xattrs -C "$tmpdir" -c . > "./cache/debian-{{ DIST }}-{{ VARIANT }}.tar"
+rm -r "$tmpdir"

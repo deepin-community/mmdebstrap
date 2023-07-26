@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+
+trap "rm -f /tmp/debian-chroot.tar.gz" EXIT INT TERM
+
+[ {{ MODE }} = "auto" ]
+
+prefix=
+if [ "$(id -u)" -eq 0 ]; then
+	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+		if [ ! -e /mmdebstrap-testenv ]; then
+			echo "this test modifies the system and should only be run inside a container" >&2
+			exit 1
+		fi
+		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+	fi
+	prefix="runuser -u ${SUDO_USER:-user} --"
+fi
+
+$prefix {{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} /tmp/debian-chroot.tar.gz {{ MIRROR }}
+tar -tf /tmp/debian-chroot.tar.gz | sort | diff -u tar1.txt -

@@ -1,15 +1,79 @@
-Source: template-repository
-Section: unknown
+Source: mmdebstrap
+Maintainer: Johannes Schauer Marin Rodrigues <josch@debian.org>
+Standards-Version: 4.6.1
+Build-Depends:
+ debhelper-compat (= 13),
+ help2man,
+ python3,
+Homepage: https://gitlab.mister-muffin.de/josch/mmdebstrap/
+Section: admin
 Priority: optional
-Maintainer: Tsic404 <liuheng@deepin.org>
-Build-Depends: debhelper (>= 11)
-Standards-Version: 4.1.3
-Homepage: https://github.com/deepin-community/template-repository
-#Vcs-Browser: https://salsa.debian.org/debian/deepin-community-template-repository
-#Vcs-Git: https://salsa.debian.org/debian/deepin-community-template-repository.git
+Vcs-Browser: https://salsa.debian.org/debian/mmdebstrap
+Vcs-Git: https://salsa.debian.org/debian/mmdebstrap.git
+Rules-Requires-Root: no
 
-Package: template-repository
-Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: <insert up to 60 chars description>
- <insert long description, indented with spaces>
+Package: mmdebstrap
+Architecture: all
+Depends:
+ apt (>= 2.3.14),
+ python3 (>= 3.10),
+ ${misc:Depends},
+ ${perl:Depends},
+Recommends:
+# building chroots for arches that cannot be executed on the current platform
+ arch-test,
+# --mode=fakechroot
+ fakechroot,
+ fakeroot,
+# figure out the right signed-by value for distributions that apt doesn't know
+# the right keyring for
+ gpg (>= 2.2.8),
+# To figure out whether a distro is EOL or not and to figure out which security
+# mirror to use because Debian bullseye and later use suite-security instead of
+# suite/updates.
+ libdistro-info-perl,
+# to find out keyring paths
+ libdpkg-perl,
+# needed in cases mknod is not permitted and device nodes have to be
+# bind-mounted instead. It is also needed in root and unshare mode to mount
+# /sys and /proc but is not needed in fakechroot mode
+ mount,
+# - --mode=unshare
+ uidmap,
+Suggests:
+# If using apt sources.list with tor+ (Tor network)
+ apt-transport-tor,
+# to have /usr/lib/apt/solvers/apt for the
+# /usr/lib/apt/solvers/mmdebstrap-dump-solution executable to function
+ apt-utils,
+# chroots for architectures that cannot be executed by the host CPU unless in
+# chrootless mode
+ binfmt-support | systemd (>= 251.2-1),
+# If using apt sources.list with https
+ ca-certificates,
+# /usr/share/debootstrap/scripts/ to infer distro names from the symlinks and
+# /usr/share/debootstrap/scripts/gutsy to figure out the default mirror URL
+ debootstrap,
+# get better data about new distros or EOL distros
+ distro-info-data,
+# the dpkg-architecture binary to turn a Debian architecture into the
+# DEB_HOST_MULTIARCH value
+ dpkg-dev,
+# --format=ext2
+ genext2fs,
+# Generation of man page from source code
+ perl-doc,
+# for cross platform builds such as building arm64 on amd64
+ qemu-user,
+ qemu-user-static,
+# --format=squashfs
+ squashfs-tools-ng,
+Description: create a Debian chroot
+ Downloads, unpacks and installs Debian packages to either directly create a
+ directory which can be chrooted into, or a tarball of it. In contrast to
+ debootstrap it uses apt, supports more than one mirror, automatically uses
+ security and updates mirrors for Debian stable chroots, is 3-6 times faster,
+ produces smaller output by removing unnecessary cruft, is bit-by-bit
+ reproducible if $SOURCE_DATE_EPOCH is set, allows unprivileged operation using
+ Linux user namespaces or fakechroot and can setup foreign architecture
+ chroots using qemu-user.

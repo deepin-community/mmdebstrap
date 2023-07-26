@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# make sure that the $FAKECHROOT_CMD_SUBST environment variable is set up
+# such that one can create a merged-/usr chroot from an unmerged-/usr system
+
+set -eu
+export LC_ALL=C.UTF-8
+export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
+trap "rm -f /tmp/chroot-fakechroot.tar /tmp/chroot-root.tar" EXIT INT TERM
+[ "$(whoami)" = "root" ]
+{{ CMD }} --mode=root --variant=apt --hook-dir=./hooks/merged-usr {{ DIST }} /tmp/chroot-root.tar {{ MIRROR }}
+cat << 'SCRIPT' > script.sh
+#!/bin/sh
+set -exu
+rootfs="$1"
+mkdir -p "$rootfs/mnt/hooks"
+[ -e /usr/libexec/mmdebstrap/ldconfig.fakechroot ] && cp -a /usr/libexec/mmdebstrap/ldconfig.fakechroot "$rootfs/mnt"
+[ -e ./ldconfig.fakechroot ] && cp -a ./ldconfig.fakechroot "$rootfs/mnt"
+[ -e /usr/share/mmdebstrap/hooks/merged-usr ] && cp -a /usr/share/mmdebstrap/hooks/merged-usr "$rootfs/mnt/hooks"
+[ -e ./hooks/merged-usr ] && cp -a ./hooks/merged-usr "$rootfs/mnt/hooks"
+[ -e /usr/bin/mmdebstrap ] && cp -aT /usr/bin/mmdebstrap "$rootfs/usr/bin/mmdebstrap"
+[ -e ./mmdebstrap ] && cp -aT ./mmdebstrap "$rootfs/mnt/mmdebstrap"
+chroot "$rootfs" env --chdir=/mnt \
+	runuser -u user -- \
+	{{ CMD }} --mode=fakechroot --variant=apt \
+	--hook-dir=./hooks/merged-usr \
+	--customize-hook='chroot "$1" echo "$FAKECHROOT_CMD_SUBST" | tr ":" "\n" | sort' \
+	--customize-hook='chroot "$1" sh -c "exec test \"\$(readlink /bin)\" = usr/bin"' \
+	--customize-hook='chroot "$1" sh -c "exec test \"\$(realpath -e /bin/ldd)\" = /usr/bin/ldd"' \
+	--customize-hook='chroot "$1" echo ":$FAKECHROOT_CMD_SUBST" | grep --quiet :/usr/bin/ldd=' \
+	--customize-hook='chroot "$1" echo ":$FAKECHROOT_CMD_SUBST" | grep --quiet :/bin/ldd=' \
+	--customize-hook='chroot "$1" env PATH=/bin ldd /bin/true 2>&1 | grep --quiet "fakeldd: objdump: command not found: install binutils package"' \
+	--customize-hook='chroot "$1" sh -c "exec test \"\$(readlink /sbin)\" = usr/sbin"' \
+	--customize-hook='chroot "$1" sh -c "exec test \"\$(realpath -e /sbin/ldconfig)\" = /usr/sbin/ldconfig"' \
+	--customize-hook='chroot "$1" echo ":$FAKECHROOT_CMD_SUBST" | grep --quiet :/usr/sbin/ldconfig=' \
+	--customize-hook='chroot "$1" echo ":$FAKECHROOT_CMD_SUBST" | grep --quiet :/sbin/ldconfig=' \
+	--customize-hook='chroot "$1" env PATH=/sbin ldconfig 2>&1 | grep --quiet "/usr/bin/env: ‘python3’: No such file or directory"' \
+	{{ DIST }} /tmp/chroot-fakechroot.tar {{ MIRROR }}
+SCRIPT
+chmod +x script.sh
+{{ CMD }} --mode=root --variant=apt --include=perl,python3,passwd,fakeroot,fakechroot \
+	--hook-dir=./hooks/no-merged-usr \
+	--customize-hook='chroot "$1" useradd --home-dir /home/user --create-home user' \
+	--customize-hook='chroot "$1" sh -c "exec test \"\$(realpath -e /usr/bin/ldd)\" = /usr/bin/ldd"' \
+	--customize-hook='chroot "$1" sh -c "exec test ! -e /usr/sbin/ldconfig"' \
+	--customize-hook=./script.sh \
+	--customize-hook="copy-out /tmp/chroot-fakechroot.tar /tmp" \
+	{{ DIST }} /dev/null {{ MIRROR }}
+cmp /tmp/chroot-fakechroot.tar /tmp/chroot-root.tar || diffoscope /tmp/chroot-fakechroot.tar /tmp/chroot-root.tar

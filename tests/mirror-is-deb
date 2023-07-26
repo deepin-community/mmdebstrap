@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
+{{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} /tmp/debian-chroot.tar "deb {{ MIRROR }} {{ DIST }} main"
+tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -
