@@ -432,11 +432,6 @@ def main():
             print(f"skipped because of {reason}:", file=sys.stderr)
             for t in l:
                 print(f"    {t}", file=sys.stderr)
-    if failed:
-        print("failed %d:" % len(failed), file=sys.stderr)
-        for f in failed:
-            print(f, file=sys.stderr)
-        exit(1)
     if len(time_per_test) > 1:
         print_time_per_test(time_per_test)
     if len(acc_time_per_test) > 1:
@@ -447,6 +442,15 @@ def main():
             },
             "accumulated test",
         )
+    if failed:
+        print("failed %d:" % len(failed), file=sys.stderr)
+        for f in failed:
+            print(f, file=sys.stderr)
+    currenttime = time.time()
+    walltime = timedelta(seconds=int(currenttime - starttime))
+    print(f"total runtime: {walltime}", file=sys.stderr)
+    if failed:
+        exit(1)
 
 
 if __name__ == "__main__":

@@ -30,33 +30,36 @@ Restrictions: needs-root, allow-stderr, skippable
 
 # add a manual trigger on those packages that in the past broke this test
 #
-# 2022
-#
-#  - passwd #1004710
-#  - python3 #1010368, #1010366
-#  - man-db #1010957
-#  - libc-bin #1017590
-#  - cron #1012622, #1020603
-#  - kmod #1020605
-#  - ifupdown #1020604
-#  - procps #1020602
-#
-# 2023
-#
-#  - fakeroot #1030638, #1023286
-#  - debootstrap #1031222, #1031105
-#  - libgdbm-compat4 #1031276
-#  - tzdata #1031395
-#  - debian-archive-keyring #1019922
-#  - doc-debian #1035913
-#  - dash #989632
+# YEAR | SOURCE PACKAGE         BUG NUMBERS                  FAILED TESTS
+# -----+-----------------------------------------------------------------------
+#      | passwd                 #1004710
+#      | python3                #1010368, #1010366
+#      | man-db                 #1010957
+# 2022 | libc-bin               #1017590
+#      | cron                   #1012622, #1020603
+#      | kmod                   #1020605
+#      | ifupdown               #1020604
+#      | procps                 #1020602
+# -----+-----------------------------------------------------------------------
+#      | fakeroot               #1030638, #1023286
+#      | debootstrap            #1031222, #1031105, #1049898, #837060 check-against-debootstrap-dist, as-debootstrap-unshare-wrapper, chrootless
+#      | libgdbm-compat4        #1031276                     check-for-bit-by-bit-identical-format-output
+#      | tzdata                 #1031395                     essential-hook, multiple-include
+# 2023 | debian-archive-keyring #1019922                     ascii-armored-keys, keyring, signed-by-without-host-keys
+#      | doc-debian             #1035913                     include, install-doc-debian, install-doc-debian-and-test-hooks, multiple-include, unpack-doc-debian
+#      | dash                   #989632
+#      | adduser                #1039709                     check-against-debootstrap-dist
+#      | debianutils            #1050752                     chrootless
+#      | usrmerge               #1050755                     chrootless-foreign
 #
 Features: test-name=hint-testsuite-triggers
 Test-Command: false
 Depends:
+ adduser,
  cron,
  dash,
  debian-archive-keyring,
+ debianutils,
  debootstrap,
  doc-debian,
  fakeroot,
@@ -69,6 +72,7 @@ Depends:
  procps,
  python3,
  tzdata,
+ usrmerge,
 Restrictions: hint-testsuite-triggers
 
 # FIXME: in an ideal world, debci would have enough computational resources

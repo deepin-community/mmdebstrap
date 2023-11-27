@@ -26,7 +26,7 @@ esac
 #  2. using ./hooks
 #  3. using /usr/share/mmdebstrap/hooks/
 for p in "$(dirname -- "$0")/.." ./hooks /usr/share/mmdebstrap/hooks; do
-	if [ -x "$p/merged-usr/setup00.sh" ] && [ -x "$p/merged-usr/essential00.sh" ]; then
+	if [ -x "$p/merged-usr/setup00.sh" ] && [ -x "$p/merged-usr/extract00.sh" ] && [ -x "$p/merged-usr/essential00.sh" ]; then
 		"$p/merged-usr/essential00.sh" "$1"
 		exit 0
 	fi

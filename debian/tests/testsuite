@@ -190,11 +190,11 @@ fi
 
 du -hs ./shared
 
-# force rebuilding the cache
-touch -d @0 shared/cache/debian/dists/unstable/InRelease
-
+# FORCE_UPDATE=yes to force rebuilding the cache
+# ONLY_HOSTARCH=yes to limit the number of downloaded content
+# RUN_MA_SAME_TESTS=no because foreign arches are missing
 ret=0
-timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD=mmdebstrap DEFAULT_DIST=$DEFAULT_DIST ONLY_HOSTARCH=yes RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no "$SRC/make_mirror.sh" || ret=$?
+timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD=mmdebstrap DEFAULT_DIST=$DEFAULT_DIST ONLY_HOSTARCH=yes FORCE_UPDATE=yes RUN_MA_SAME_TESTS=no HAVE_QEMU=no HAVE_BINFMT=no "$SRC/make_mirror.sh" || ret=$?
 if [ "$ret" -ne 0 ]; then
 	echo "./make_mirror.sh failed" >&2
 	exit 77
@@ -210,7 +210,7 @@ TIMEOUT=$((10000-$(date +%s)+$TIME_BEGIN-10))
 SKIPPED_TESTS=$(grep-dctrl --exact-match --field Needs-APT-Config true --no-field-names --show-field=Test < coverage.txt)
 # for tar1.txt also add create-directory test
 SKIPPED_TESTS="create-directory $SKIPPED_TESTS"
-timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no "$SRC/coverage.py" --exitfirst $SKIPPED_TESTS || exit 77
+timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=no HAVE_QEMU=no HAVE_BINFMT=no "$SRC/coverage.py" --exitfirst $SKIPPED_TESTS || exit 77
 
 du -hs ./shared
 

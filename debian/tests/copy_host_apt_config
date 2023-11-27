@@ -17,6 +17,7 @@ set -exu
 # deb-src http://debian.osuosl.org/debian unstable main contrib non-free
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
 	[ -e "$f" ] || continue
+	mkdir -p "$(dirname "$1/$f")"
 	echo >> "$1/$f"
 	# this regex replaces the deb.debian.org and the debian.osuosl.org (on
 	# s390x) parts of a sources.list with 127.0.0.1
@@ -38,6 +39,7 @@ done
 # Pin-Priority: 995
 for f in /etc/apt/preferences.d/*; do
 	[ -e "$f" ] || continue
+	mkdir -p "$(dirname "$1/$f")"
 	# we append instead of overwriting
 	echo >> "$1/$f"
 	cat "$f" >> "$1/$f"

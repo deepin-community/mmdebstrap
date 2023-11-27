@@ -47,40 +47,6 @@ fi
 
 TARGET="$1"
 
-ARCH=$(dpkg --print-architecture)
-eval "$(APT_CONFIG="$MMDEBSTRAP_APT_CONFIG" apt-config shell ARCH Apt::Architecture)"
-
-if [ -e /usr/share/debootstrap/functions ]; then
-	# shellcheck disable=SC1091
-	. /usr/share/debootstrap/functions
-	doing_variant () { [ "$1" != "buildd" ]; }
-	# shellcheck disable=SC2034
-	MERGED_USR="yes"
-	setup_merged_usr
-else
-	link_dir=""
-	case $ARCH in
-	    hurd-*) exit 0;;
-	    amd64) link_dir="lib32 lib64 libx32" ;;
-	    i386) link_dir="lib64 libx32" ;;
-	    mips|mipsel) link_dir="lib32 lib64" ;;
-	    mips64*|mipsn32*) link_dir="lib32 lib64 libo32" ;;
-	    powerpc) link_dir="lib64" ;;
-	    ppc64) link_dir="lib32 lib64" ;;
-	    ppc64el) link_dir="lib64" ;;
-	    s390x) link_dir="lib32" ;;
-	    sparc) link_dir="lib64" ;;
-	    sparc64) link_dir="lib32 lib64" ;;
-	    x32) link_dir="lib32 lib64 libx32" ;;
-	esac
-	link_dir="bin sbin lib $link_dir"
-
-	for dir in $link_dir; do
-		ln -s usr/"$dir" "$TARGET/$dir"
-		mkdir -p "$TARGET/usr/$dir"
-	done
-fi
-
 # now install an empty "usr-is-merged" package to avoid installing the
 # usrmerge package on this system even after init-system-helpers starts
 # depending on "usrmerge | usr-is-merged".
