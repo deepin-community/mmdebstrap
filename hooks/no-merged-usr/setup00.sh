@@ -18,6 +18,7 @@ fi
 TARGET="$1"
 
 echo "Warning: starting with Debian 12 (Bookworm), systems without merged-/usr are not supported anymore" >&2
+echo "Warning: starting with Debian 13 (Trixie), merged-/usr symlinks are shipped by packages in the essential-set making this hook ineffective" >&2
 
 echo "this system will not be supported in the future" > "$TARGET/etc/unsupported-skip-usrmerge-conversion"
 

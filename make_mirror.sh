@@ -250,6 +250,17 @@ END
 	trap "-" EXIT INT TERM
 )
 
+check_proxy_running() {
+	if timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET http://deb.debian.org/debian/dists/'"$DEFAULT_DIST"'/InRelease HTTP/1.1\nHost: deb.debian.org\n\n" >&3 && grep "Suite: '"$DEFAULT_DIST"'" <&3 >/dev/null' 2>/dev/null; then
+		return 0
+	elif timeout 1 env http_proxy="http://127.0.0.1:8080/" wget --quiet -O - "http://deb.debian.org/debian/dists/$DEFAULT_DIST/InRelease" | grep "Suite: $DEFAULT_DIST" >/dev/null; then
+		return 0
+	elif timeout 1 curl --proxy "http://127.0.0.1:8080/" --silent "http://deb.debian.org/debian/dists/$DEFAULT_DIST/InRelease" | grep "Suite: $DEFAULT_DIST" >/dev/null; then
+		return 0
+	fi
+	return 1
+}
+
 if [ -e "./shared/cache.A" ] && [ -e "./shared/cache.B" ]; then
 	echo "both ./shared/cache.A and ./shared/cache.B exist" >&2
 	echo "was a former run of the script aborted?" >&2
@@ -301,8 +312,9 @@ components=main
 # by default, use the mmdebstrap executable in the current directory
 : "${CMD:=./mmdebstrap}"
 : "${USE_HOST_APT_CONFIG:=no}"
+: "${FORCE_UPDATE:=no}"
 
-if [ -e "$oldmirrordir/dists/$DEFAULT_DIST/InRelease" ]; then
+if [ "$FORCE_UPDATE" != "yes" ] && [ -e "$oldmirrordir/dists/$DEFAULT_DIST/InRelease" ]; then
 	http_code=$(curl --output /dev/null --silent --location --head --time-cond "$oldmirrordir/dists/$DEFAULT_DIST/InRelease" --write-out '%{http_code}' "$mirror/dists/$DEFAULT_DIST/InRelease")
 	case "$http_code" in
 		200) ;; # need update
@@ -316,7 +328,7 @@ PROXYPID=$!
 trap 'kill "$PROXYPID" || :' EXIT INT TERM
 
 for i in $(seq 10); do
-	curl --proxy "http://127.0.0.1:8080/" --silent -o /dev/null "http://deb.debian.org/debian/dists/$DEFAULT_DIST/InRelease" && break
+	check_proxy_running && break
 	sleep 1
 done
 if [ ! -s "$newmirrordir/dists/$DEFAULT_DIST/InRelease" ]; then
@@ -425,7 +437,7 @@ if [ "$HAVE_QEMU" = "yes" ]; then
 	PROXYPID=$!
 
 	for i in $(seq 10); do
-		curl --proxy "http://127.0.0.1:8080/" --silent -o /dev/null "http://deb.debian.org/debian/dists/$DEFAULT_DIST/InRelease" && break
+		check_proxy_running && break
 		sleep 1
 	done
 	if [ ! -s "$newmirrordir/dists/$DEFAULT_DIST/InRelease" ]; then
@@ -437,7 +449,7 @@ if [ "$HAVE_QEMU" = "yes" ]; then
 	tmpdir="$(mktemp -d)"
 	trap 'kill "$PROXYPID" || :;cleanuptmpdir; cleanup_newcachedir' EXIT INT TERM
 
-	pkgs=perl-doc,systemd-sysv,perl,arch-test,fakechroot,fakeroot,mount,uidmap,qemu-user-static,qemu-user,dpkg-dev,mini-httpd,libdevel-cover-perl,libtemplate-perl,debootstrap,procps,apt-cudf,aspcud,python3,libcap2-bin,gpg,debootstrap,distro-info-data,iproute2,ubuntu-keyring,apt-utils,disorderfs,squashfs-tools-ng,genext2fs,linux-image-generic
+	pkgs=perl-doc,systemd-sysv,perl,arch-test,fakechroot,fakeroot,mount,uidmap,qemu-user-static,qemu-user,dpkg-dev,mini-httpd,libdevel-cover-perl,libtemplate-perl,debootstrap,procps,apt-cudf,aspcud,python3,libcap2-bin,gpg,debootstrap,distro-info-data,iproute2,ubuntu-keyring,apt-utils,squashfs-tools-ng,genext2fs,linux-image-generic
 	if [ ! -e ./mmdebstrap ]; then
 		pkgs="$pkgs,mmdebstrap"
 	fi
@@ -518,8 +530,7 @@ END
 	fi
 	# set PATH to pick up the correct mmdebstrap variant
 	env PATH="$(dirname "$(realpath --canonicalize-existing "$CMD")"):$PATH" \
-		debvm-create --skip=usrmerge --size="$DISK_SIZE" \
-		--release="$DEFAULT_DIST" --skip=usrmerge \
+		debvm-create --skip=usrmerge --size="$DISK_SIZE" --release="$DEFAULT_DIST" \
 		--output="$newcachedir/debian-$DEFAULT_DIST.ext4" -- \
 		--architectures="$arches" --include="$pkgs" \
 		--setup-hook='echo "Acquire::http::Proxy \"http://127.0.0.1:8080/\";" > "$1/etc/apt/apt.conf.d/00proxy"' \
@@ -550,3 +561,5 @@ mv --no-target-directory ./shared/cache.tmp ./shared/cache
 deletecache "$oldcachedir"
 
 trap - EXIT INT TERM
+
+echo "$0 finished successfully" >&2

@@ -1,0 +1,389 @@
+#!/bin/sh
+# Copyright 2023 Johannes Schauer Marin Rodrigues <josch@debian.org>
+# Copyright 2023 Helmut Grohne <helmut@subdivi.de>
+# SPDX-License-Identifier: MIT
+
+# We generally use single quotes to avoid variable expansion:
+# shellcheck disable=SC2016
+
+# Replacement for autopkgtest-build-qemu and vmdb2 for all architectures
+# supporting EFI booting (amd64, arm64, armhf, i386, riscv64).
+# For use as replacement for autopkgtest-build-qemu and vmdb2 on ppc64el which
+# neither supports extlinux nor efi booting there is an unmaintained script
+# which uses grub instead to boot:
+#
+#     https://gitlab.mister-muffin.de/josch/mmdebstrap/src/commit/
+#     e523741610a4ed8579642bfc755956f64c847ef3/mmdebstrap-autopkgtest-build-qemu
+
+: <<'POD2MAN'
+=head1 NAME
+
+mmdebstrap-autopkgtest-build-qemu - autopkgtest-build-qemu without vmdb2 but mmdebstrap and EFI boot
+
+=head1 SYNOPSIS
+
+B<mmdebstrap-autopkgtest-build-qemu> [I<OPTIONS>] B<--boot>=B<efi> I<RELEASE> I<IMAGE>
+
+=head1 DESCRIPTION
+
+B<mmdebstrap-autopkgtest-build-qemu> is a mostly compatible drop-in replacement
+for B<autopkgtest-build-qemu>(1) with two main differences: Firstly, it uses
+B<mmdebstrap>(1) instead of B<vmdb2>(1) and thus is able to create QEMU disk
+images without requiring superuser privileges.  Secondly, it uses
+B<systemd-boot>(7) and thus only supports booting via EFI.
+
+=head1 POSITIONAL PARAMETERS
+
+=over 8
+
+=item I<RELEASE>
+
+The release to download from the I<MIRROR>.  This parameter is required.
+
+=item I<IMAGE>
+
+The file to write, in raw format. This parameter is required.
+
+=back
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--mirror>=I<MIRROR>
+
+Specify  which  distribution  to install.  It defaults to
+http://deb.debian.org/debian (i.e. Debian), but you can pass a mirror of any
+Debian derivative.
+
+=item B<--architecture>=I<ARCHITECTURE>
+
+Set the architecture for the virtual machine image, specified as a B<dpkg>(1)
+architecture.  If  omitted, the host architecture is assumed.
+
+B<--arch>=I<ARCH> is an alias for this option.
+
+=item B<--script>=I<SCRIPT>
+
+Specifies a user script that will be called with the root filesystem of the
+image as its first parameter. This script can them make any necesssary
+modifications to the root filesystem.
+
+The script must be a POSIX shell script, and should not depend on bash-specific
+features. This  script will be executed inside a B<chroot>(1) call in the
+virtual machine root filesystem.
+
+=item B<--size>=I<SIZE>
+
+Specifies the image size for the virtual machine, defaulting to 25G.
+
+=item B<--apt-proxy>=I<PROXY>
+
+Specify  an  apt proxy to use in the virtual machine.  By default, if you have
+an apt proxy configured on the host, the virtual machine will automatically use
+this, otherwise there is no default.
+
+=item B<--boot>=B<efi>, B<--efi>
+
+Select the way the generated image will expect to be booted. Unless you
+explicitly select --boot=efi, operation will fail.
+
+=item B<--keyring>=I<KEYRING>
+
+Passes an additional B<--keyring> parameter to B<mmdebstrap>.
+
+=back
+
+=head1 EXAMPLES
+
+    $ mmdebstrap-autopkgtest-build-qemu --boot=efi stable /path/to/debian-stable-i386.img i386
+
+    $ mmdebstrap-autopkgtest-build-qemu --boot=efi unstable /path/to/debian-unstable.img
+
+=head1 SEE ALSO
+
+    B<autopkgtest-build-qemu>(1), B<autopkgtest-virt-qemu>(1), B<mmdebstrap>(1), B<autopkgtest>(1)
+
+=cut
+POD2MAN
+
+set -eu
+
+die() {
+	echo "$*" 1>&2
+	exit 1
+}
+usage() {
+	die "usage: $0 [--architecture=|--apt-proxy=|--keyring=|--mirror=|--script=|--size=] --boot=efi <RELEASE> <IMAGE>"
+}
+usage_error() {
+	echo "error: $*" 1>&2
+	usage
+}
+
+BOOT=auto
+ARCHITECTURE=$(dpkg --print-architecture)
+IMAGE=
+MIRROR=
+KEYRING=
+RELEASE=
+SIZE=25G
+SCRIPT=
+
+# consumed by setup-testbed
+export AUTOPKGTEST_BUILD_QEMU=1
+
+opt_boot() {
+	BOOT="$1"
+}
+opt_architecture() {
+	ARCHITECTURE="$1"
+}
+opt_arch() {
+	ARCHITECTURE="$1"
+}
+opt_apt_proxy() {
+	# consumed by setup-testbed
+	export AUTOPKGTEST_APT_PROXY="$1"
+	# consumed by mmdebstrap
+	if test "$1" = DIRECT; then
+		unset http_proxy
+	else
+		export http_proxy="$1"
+	fi
+}
+opt_keyring() {
+	KEYRING="$1"
+}
+opt_mirror() {
+	# consumed by setup-testbed
+	export MIRROR="$1"
+}
+opt_script() {
+	test -f "$1" || die "passed script '$1' does not refer to a file"
+	SCRIPT="$1"
+}
+opt_size() {
+	SIZE="$1"
+}
+
+positional=1
+positional_1() {
+	# consumed by setup-testbed
+	export RELEASE="$1"
+}
+positional_2() {
+	IMAGE="$1"
+}
+positional_3() { opt_mirror "$@"; }
+positional_4() { opt_architecture "$@"; }
+positional_5() { opt_script "$@"; }
+positional_6() { opt_size "$@"; }
+positional_7() {
+	die "too many positional options"
+}
+
+while test "$#" -gt 0; do
+	case "$1" in
+		--architecture=*|--arch=*|--boot=*|--keyring=*|--mirror=*|--script=*|--size=*)
+			optname="${1%%=*}"
+			"opt_${optname#--}" "${1#*=}"
+		;;
+		--apt-proxy=*)
+			opt_apt_proxy "${1#*=}"
+		;;
+		--architecture|--arch|--boot|--keyring|--mirror|--script|--size)
+			test "$#" -ge 2 || usage_error "missing argument for $1"
+			"opt_${1#--}" "$2"
+			shift
+		;;
+		--apt-proxy)
+			test "$#" -ge 2 || usage_error "missing argument for $1"
+			opt_apt_proxy "$2"
+			shift
+		;;
+		--efi)
+			opt_boot efi
+		;;
+		--*)
+			usage_error "unrecognized argument $1"
+		;;
+		*)
+			"positional_$positional" "$1"
+			positional=$((positional + 1))
+		;;
+	esac
+	shift
+done
+
+test -z "$RELEASE" -o -z "$IMAGE" && usage_error "missing positional arguments"
+test "$BOOT" = efi ||
+	die "this tool does not support boot modes other than efi"
+
+case "$ARCHITECTURE" in
+	amd64)
+		EFIIMG=bootx64.efi
+	;;
+	arm64)
+		EFIIMG=bootaa64.efi
+	;;
+	armhf)
+		EFIIMG=bootarm.efi
+	;;
+	i386)
+		EFIIMG=bootia32.efi
+	;;
+	riscv64)
+		EFIIMG=bootriscv64.efi
+	;;
+	*)
+		die "unsupported architecture"
+	;;
+esac
+
+if test "$(dpkg-query -f '${db:Status-Status}' -W binutils-multiarch)" = installed; then
+	GNU_PREFIX=
+else
+	GNU_ARCHITECTURE="$(dpkg-architecture "-a$ARCHITECTURE" -qDEB_HOST_GNU_TYPE)"
+	GNU_PREFIX="$GNU_ARCHITECTURE-"
+	GNU_SUFFIX="-$(echo "$GNU_ARCHITECTURE" | tr _ -)"
+	test "$(dpkg-query -f '${db:Status-Status}' -W "binutils$GNU_SUFFIX")" = installed ||
+		die "please install binutils$GNU_SUFFIX or binutils-multiarch"
+fi
+for pkg in autopkgtest dosfstools e2fsprogs fdisk mount mtools passwd "systemd-boot-efi:$ARCHITECTURE" uidmap; do
+	test "$(dpkg-query -f '${db:Status-Status}' -W "$pkg")" = installed ||
+		die "please install $pkg"
+done
+
+BOOTSTUB="/usr/lib/systemd/boot/efi/linux${EFIIMG#boot}.stub"
+
+WORKDIR=
+
+cleanup() {
+	test -n "$WORKDIR" && rm -Rf "$WORKDIR"
+}
+
+trap cleanup EXIT INT TERM QUIT
+
+WORKDIR=$(mktemp -d)
+
+FAT_OFFSET_SECTORS=$((1024*2))
+FAT_SIZE_SECTORS=$((1024*254))
+
+# Make the image writeable to the first subgid. mmdebstrap will map this gid to
+# the root group. unshare instead will map the current gid to 0 and the first
+# subgid to 1. Therefore mmdebstrap will be able to write to the image.
+rm -f "$IMAGE"
+: >"$IMAGE"
+unshare -U -r --map-groups=auto chown 0:1 "$IMAGE"
+chmod 0660 "$IMAGE"
+
+set -- \
+	--mode=unshare \
+	--variant=important \
+	--architecture="$ARCHITECTURE"
+
+test "$RELEASE" = jessie &&
+	set -- "$@" --hook-dir=/usr/share/mmdebstrap/hooks/jessie-or-older
+
+set -- "$@" \
+	"--include=init,linux-image-$ARCHITECTURE,python3" \
+	'--customize-hook=echo autopkgtestvm >"$1/etc/hostname"' \
+	'--customize-hook=echo 127.0.0.1 localhost autopkgtestvm >"$1/etc/hosts"' \
+	'--customize-hook=passwd --root "$1" --delete root' \
+	'--customize-hook=useradd --root "$1" --home-dir /home/user --create-home user' \
+	'--customize-hook=passwd --root "$1" --delete user' \
+	'--customize-hook=/usr/share/autopkgtest/setup-commands/setup-testbed'
+
+if test -n "$SCRIPT"; then
+	set -- "$@" \
+		"--customize-hook=upload '$SCRIPT' /userscript" \
+		"--chrooted-customize-hook=sh /userscript" \
+		'--customize-hook=rm -f "$1/userscript"'
+fi
+
+EXT4_OFFSET_BYTES=$(( (FAT_OFFSET_SECTORS + FAT_SIZE_SECTORS) * 512))
+EXT4_OPTIONS="offset=$EXT4_OFFSET_BYTES,assume_storage_prezeroed=1"
+set -- "$@" \
+	"--customize-hook=download vmlinuz '$WORKDIR/kernel'" \
+	"--customize-hook=download initrd.img '$WORKDIR/initrd'" \
+	'--customize-hook=mount --bind "$1" "$1/mnt"' \
+	'--customize-hook=mount --bind "$1/mnt/mnt" "$1/mnt/dev"' \
+	'--customize-hook=/sbin/mkfs.ext4 -d "$1/mnt" -L autopkgtestvm -E '"'$EXT4_OPTIONS' '$IMAGE' '$SIZE'" \
+	'--customize-hook=umount --lazy "$1/mnt"' \
+	"$RELEASE" \
+	/dev/null
+
+test -n "$MIRROR" && set -- "$@" "$MIRROR"
+test -n "$KEYRING" && set -- "$@" "--keyring=$KEYRING"
+
+echo "mmdebstrap $*"
+mmdebstrap "$@" || die "mmdebstrap failed"
+
+unshare -U -r --map-groups=auto chown 0:0 "$IMAGE"
+chmod "$(printf %o "$(( 0666 - 0$(umask) ))")" "$IMAGE"
+
+echo "root=LABEL=autopkgtestvm rw console=ttyS0" > "$WORKDIR/cmdline"
+
+align_size() {
+	echo "$(( ($1) + ($2) - 1 - (($1) + ($2) - 1) % ($2) ))"
+}
+
+alignment=$("${GNU_PREFIX}objdump" -p "$BOOTSTUB" | sed 's/^SectionAlignment\s\+\([0-9]\)/0x/;t;d')
+test -z "$alignment" && die "failed to discover the alignment of the efi stub"
+echo "determined efi vma alignment as $alignment"
+test "$RELEASE" = jessie -a "$((alignment))" -lt "$((1024*1024))" && {
+	echo "increasing efi vma alignment for jessie"
+	alignment=$((1024*1024))
+}
+lastoffset=0
+# shellcheck disable=SC2034  # unused variables serve documentation
+lastoffset="$("${GNU_PREFIX}objdump" -h "$BOOTSTUB" |
+	while read -r idx name size vma lma fileoff algn behind; do
+		test -z "$behind" -a "${algn#"2**"}" != "$algn" || continue
+		offset=$(( 0x$vma + 0x$size ))
+		test "$offset" -gt "$lastoffset" || continue
+		lastoffset="$offset"
+		echo "$lastoffset"
+	done | tail -n1)"
+lastoffset=$(align_size "$lastoffset" "$alignment")
+echo "determined minimum efi vma offset as $lastoffset"
+
+cmdline_size="$(stat -Lc%s "$WORKDIR/cmdline")"
+cmdline_size="$(align_size "$cmdline_size" "$alignment")"
+linux_size="$(stat -Lc%s "$WORKDIR/kernel")"
+linux_size="$(align_size "$linux_size" "$alignment")"
+cmdline_offset="$lastoffset"
+linux_offset=$((cmdline_offset + cmdline_size))
+initrd_offset=$((linux_offset + linux_size))
+
+SOURCE_DATE_EPOCH=0 \
+	"${GNU_PREFIX}objcopy" \
+	--enable-deterministic-archives \
+	--add-section .cmdline="$WORKDIR/cmdline" \
+	--change-section-vma .cmdline="$(printf 0x%x "$cmdline_offset")" \
+	--add-section .linux="$WORKDIR/kernel" \
+	--change-section-vma .linux="$(printf 0x%x "$linux_offset")" \
+	--add-section .initrd="$WORKDIR/initrd" \
+	--change-section-vma .initrd="$(printf 0x%x "$initrd_offset")" \
+	"$BOOTSTUB" "$WORKDIR/efiimg"
+
+rm -f "$WORKDIR/kernel" "$WORKDIR/initrd"
+
+truncate -s "$((FAT_SIZE_SECTORS * 512))" "$WORKDIR/fat"
+/sbin/mkfs.fat -F 32 --invariant "$WORKDIR/fat"
+mmd -i "$WORKDIR/fat" EFI EFI/BOOT
+mcopy -i "$WORKDIR/fat" "$WORKDIR/efiimg" "::EFI/BOOT/$EFIIMG"
+
+rm -f "$WORKDIR/efiimg"
+
+truncate --size="+$((34*512))" "$IMAGE"
+/sbin/sfdisk "$IMAGE" <<EOF
+label: gpt
+unit: sectors
+
+start=$FAT_OFFSET_SECTORS, size=$FAT_SIZE_SECTORS, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+start=$((FAT_OFFSET_SECTORS + FAT_SIZE_SECTORS)), type=0FC63DAF-8483-4772-8E79-3D69D8477DE4
+EOF
+
+dd if="$WORKDIR/fat" of="$IMAGE" conv=notrunc,sparse bs=512 "seek=$FAT_OFFSET_SECTORS" status=none

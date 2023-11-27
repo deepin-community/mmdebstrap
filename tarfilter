@@ -43,6 +43,29 @@ class PaxFilterAction(argparse.Action):
         setattr(namespace, "paxfilter", items)
 
 
+class TypeFilterAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        items = getattr(namespace, "typefilter", [])
+        match values:
+            case "REGTYPE" | "0":
+                items.append(tarfile.REGTYPE)
+            case "LNKTYPE" | "1":
+                items.append(tarfile.LNKTYPE)
+            case "SYMTYPE" | "2":
+                items.append(tarfile.SYMTYPE)
+            case "CHRTYPE" | "3":
+                items.append(tarfile.CHRTYPE)
+            case "BLKTYPE" | "4":
+                items.append(tarfile.BLKTYPE)
+            case "DIRTYPE" | "5":
+                items.append(tarfile.DIRTYPE)
+            case "FIFOTYPE" | "6":
+                items.append(tarfile.FIFOTYPE)
+            case _:
+                raise ValueError("invalid type: %s" % values)
+        setattr(namespace, "typefilter", items)
+
+
 class TransformAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         items = getattr(namespace, "trans", [])
@@ -89,10 +112,11 @@ dpkg(1) for information on how these two options work in detail. To reuse the
 exact same semantics as used by dpkg, paths must be given as /path and not as
 ./path even though they might be stored as such in the tarball.
 
-Secondly, filter out unwanted pax extended headers. This is useful in cases
-where a tool only accepts certain xattr prefixes. For example tar2sqfs only
-supports SCHILY.xattr.user.*, SCHILY.xattr.trusted.* and
-SCHILY.xattr.security.* but not SCHILY.xattr.system.posix_acl_default.*.
+Secondly, filter out unwanted pax extended headers using --pax-exclude and
+--pax-include. This is useful in cases where a tool only accepts certain xattr
+prefixes. For example tar2sqfs only supports SCHILY.xattr.user.*,
+SCHILY.xattr.trusted.* and SCHILY.xattr.security.* but not
+SCHILY.xattr.system.posix_acl_default.*.
 
 Both types of options use Unix shell-style wildcards:
 
@@ -101,10 +125,16 @@ Both types of options use Unix shell-style wildcards:
    [seq] matches any character in seq
   [!seq] matches any character not in seq
 
-Thirdly, transform the path of tar members using a sed expression just as with
+Thirdly, filter out files matching a specific tar archive member type using
+--type-exclude. Valid type names are REGTYPE (regular file), LNKTYPE
+(hardlink), SYMTYPE (symlink), CHRTYPE (character special), BLKTYPE (block
+special), DIRTYPE (directory), FIFOTYPE (fifo) or their tar format flag value
+(0-6, respectively).
+
+Fourthly, transform the path of tar members using a sed expression just as with
 GNU tar --transform.
 
-Fourthly, strip leading directory components off of tar members. Just as with
+Fifthly, strip leading directory components off of tar members. Just as with
 GNU tar --strip-components, tar members that have less or equal components in
 their path are not passed through.
 
@@ -141,6 +171,15 @@ Lastly, shift user id and group id of each entry by the value given by the
         "This option can be specified multiple times.",
     )
     parser.add_argument(
+        "--type-exclude",
+        metavar="type",
+        action=TypeFilterAction,
+        help="Exclude certain member types by their type. Choose types either "
+        "by their name (REGTYPE, LNKTYPE, SYMTYPE, CHRTYPE, BLKTYPE, DIRTYPE, "
+        "FIFOTYPE) or by their tar format flag values (0-6, respectively). "
+        "This option can be specified multiple times.",
+    )
+    parser.add_argument(
         "--transform",
         "--xform",
         metavar="EXPRESSION",
@@ -164,6 +203,7 @@ Lastly, shift user id and group id of each entry by the value given by the
     if (
         not hasattr(args, "pathfilter")
         and not hasattr(args, "paxfilter")
+        and not hasattr(args, "typefilter")
         and not hasattr(args, "strip_components")
     ):
         from shutil import copyfileobj
@@ -207,13 +247,23 @@ Lastly, shift user id and group id of each entry by the value given by the
                 skip = True
         return skip
 
-    # starting with Python 3.8, the default format became PAX_FORMAT, so this
-    # is only for compatibility with older versions of Python 3
+    def type_filter_should_skip(member):
+        if not hasattr(args, "typefilter"):
+            return False
+        for t in args.typefilter:
+            if member.type == t:
+                return True
+        return False
+
+    # starting with Python 3.8, the default format became PAX_FORMAT but we
+    # are still explicit here in case of future changes.
     with tarfile.open(fileobj=sys.stdin.buffer, mode="r|*") as in_tar, tarfile.open(
         fileobj=sys.stdout.buffer, mode="w|", format=tarfile.PAX_FORMAT
     ) as out_tar:
         for member in in_tar:
             if path_filter_should_skip(member):
+                continue
+            if type_filter_should_skip(member):
                 continue
             if args.strip_components:
                 comps = member.name.split("/")

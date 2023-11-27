@@ -23,7 +23,7 @@
 use strict;
 use warnings;
 
-our $VERSION = '1.3.7';
+our $VERSION = '1.4.0';
 
 use English;
 use Getopt::Long;
@@ -1170,12 +1170,18 @@ sub setup_mounts {
                             );
                             next;
                         }
+                        if (-e "$options->{root}/dev/$fname") {
+                            warning(
+                                "skipping creation of ./dev/$fname because it"
+                                  . " already exists in the target");
+                            next;
+                        }
                         push @cleanup_tasks, sub {
                             unlink "$options->{root}/dev/$fname"
                               or warning("cannot unlink ./dev/$fname: $!");
                         };
                         symlink $linkname, "$options->{root}/dev/$fname"
-                          or error
+                          or warning
                           "cannot create symlink ./dev/$fname -> $linkname";
                     }
                 } elsif ($type == 3 or $type == 4) {
@@ -1266,8 +1272,9 @@ sub setup_mounts {
                             next;
                         }
                         if (!$options->{havemknod}) {
-                          # If had mknod, then the directory to bind-mount into
-                          # was already created in the run_setup function.
+                            # If had mknod, then the directory to bind-mount
+                            # into was already created in the run_setup
+                            # function.
                             push @cleanup_tasks, sub {
                                 rmdir "$options->{root}/dev/$fname"
                                   or warning("cannot rmdir ./dev/$fname: $!");
@@ -1309,17 +1316,17 @@ sub setup_mounts {
                               or warning("umount ./dev/$fname failed: $?");
                         };
                         if ($fname eq "pts/") {
-                          # We cannot just bind-mount /dev/pts from the host as
-                          # doing so will make posix_openpt() fail. Instead, we
-                          # need to mount a new devpts.
-                          # We need ptmxmode=666 because /dev/ptmx is a symlink
-                          # to /dev/pts/ptmx and without it posix_openpt() will
-                          # fail if we are not the root user.
-                          # See also:
-                          # kernel.org/doc/Documentation/filesystems/devpts.txt
-                          # salsa.debian.org/debian/schroot/-/merge_requests/2
-                          # https://bugs.debian.org/856877
-                          # https://bugs.debian.org/817236
+                            # We cannot just bind-mount /dev/pts from the host
+                            # as doing so will make posix_openpt() fail.
+                            # Instead, we need to mount a new devpts.
+                            # We need ptmxmode=666 because /dev/ptmx is a
+                            # symlink to /dev/pts/ptmx and without it
+                            # posix_openpt() will fail if we are not the root
+                            # user. See also:
+                            # kernel.o/doc/Documentation/filesystems/devpts.txt
+                            # salsa.d.o/debian/schroot/-/merge_requests/2
+                            # https://bugs.debian.org/856877
+                            # https://bugs.debian.org/817236
                             0 == system(
                                 'mount',
                                 '-t',
@@ -1623,6 +1630,7 @@ sub run_hooks {
     if (defined $options->{suite}) {
         push @env_opts, "MMDEBSTRAP_SUITE=$options->{suite}";
     }
+    push @env_opts, "MMDEBSTRAP_FORMAT=$options->{format}";
     # Storing the hook name is important for hook scripts to potentially change
     # their behavior depending on the hook. It's also important for when the
     # hook wants to use the mmdebstrap --hook-helper.
@@ -1652,6 +1660,9 @@ sub run_hooks {
     if ($name eq "extract" and scalar @{$essential_pkgs} > 0) {
         push @env_opts,
           ("MMDEBSTRAP_ESSENTIAL=" . (join " ", @{$essential_pkgs}));
+    }
+    if ($options->{mode} eq 'unshare') {
+        push @env_opts, "container=mmdebstrap-unshare";
     }
 
     # Unset the close-on-exec flag, so that the file descriptor does not
@@ -1744,7 +1755,8 @@ sub run_hooks {
                     # does for python
                     my @args = shellwords $script;
                     hookhelper($options->{root}, $options->{mode}, $name,
-                        $options->{qemu}, $verbosity_level, @args);
+                        (join ',', @{ $options->{skip} }),
+                        $verbosity_level, @args);
                     exit 0;
                 }
                 waitpid($pid, 0);
@@ -2589,6 +2601,8 @@ sub run_extract() {
         }
         # not using dpkg-deb --extract as that would replace the
         # merged-usr symlinks with plain directories
+        # even after switching from pre-merging to post-merging, dpkg-deb
+        # will ignore filter rules from dpkg.cfg.d
         # https://bugs.debian.org/989602
         # not using dpkg --unpack because that would try running preinst
         # maintainer scripts
@@ -2768,90 +2782,49 @@ sub run_prepare {
         error "unknown mode: $options->{mode}";
     }
 
-    # copy qemu-user-static binary into chroot
-    if (defined $options->{qemu}) {
-        if ($options->{mode} eq 'fakechroot') {
-            # Make sure that the fakeroot and fakechroot shared
-            # libraries exist for the right architecture
-            open my $fh, '-|', 'dpkg-architecture', '-a',
-              $options->{nativearch},
-              '-qDEB_HOST_MULTIARCH' // error "failed to fork(): $!";
-            chomp(
-                my $deb_host_multiarch = do { local $/; <$fh> }
-            );
-            close $fh;
-            if (($? != 0) or (!$deb_host_multiarch)) {
-                error "dpkg-architecture failed: $?";
-            }
-            my $fakechrootdir = "/usr/lib/$deb_host_multiarch/fakechroot";
-            if (!-e "$fakechrootdir/libfakechroot.so") {
-                error "$fakechrootdir/libfakechroot.so doesn't exist."
-                  . " Install libfakechroot:$options->{nativearch}"
-                  . " outside the chroot";
-            }
-            my $fakerootdir = "/usr/lib/$deb_host_multiarch/libfakeroot";
-            if (!-e "$fakerootdir/libfakeroot-sysv.so") {
-                error "$fakerootdir/libfakeroot-sysv.so doesn't exist."
-                  . " Install libfakeroot:$options->{nativearch}"
-                  . " outside the chroot";
-            }
-            # The rest of this block sets environment variables, so we
-            # have to add the "no critic" statement to stop perlcritic
-            # from complaining about setting global variables
-            ## no critic (Variables::RequireLocalizedPunctuationVars)
-            # fakechroot only fills LD_LIBRARY_PATH with the
-            # directories of the host's architecture. We append the
-            # directories of the chroot architecture.
-            $ENV{LD_LIBRARY_PATH}
-              = "$ENV{LD_LIBRARY_PATH}:$fakechrootdir:$fakerootdir";
-            # The binfmt support on the outside is used, so qemu needs
-            # to know where it has to look for shared libraries
-            if (defined $ENV{QEMU_LD_PREFIX}
-                && $ENV{QEMU_LD_PREFIX} ne "") {
-                $ENV{QEMU_LD_PREFIX} = "$ENV{QEMU_LD_PREFIX}:$options->{root}";
-            } else {
-                $ENV{QEMU_LD_PREFIX} = $options->{root};
-            }
-        } elsif (any { $_ eq $options->{mode} } ('root', 'unshare')) {
-            my $require_qemu_static = 1;
-            # make $@ local, so we don't print an eventual error
-            # in other parts where we evaluate $@
-            local $@ = '';
-            eval {
-                # Check for the F flag which makes the kernel open the binfmt
-                # binary at configuration time instead of lazily at startup
-                # time. If the flag is set, then the qemu-static binary is not
-                # required inside the chroot.
-                if (-e "/proc/sys/fs/binfmt_misc/qemu-$options->{qemu}") {
-                    open my $fh, '<',
-                      "/proc/sys/fs/binfmt_misc/qemu-$options->{qemu}";
-                    while (my $line = <$fh>) {
-                        chomp($line);
-                        if ($line =~ /^flags: [A-Z]*F[A-Z]*$/) {
-                            $require_qemu_static = 0;
-                            last;
-                        }
-                    }
-                    close $fh;
-                }
-            };
-            if ($require_qemu_static) {
-                # other modes require a static qemu-user binary
-                my $qemubin = "/usr/bin/qemu-$options->{qemu}-static";
-                if (!-e $qemubin) {
-                    error "cannot find $qemubin";
-                }
-                copy $qemubin, "$options->{root}/$qemubin"
-                  or error "cannot copy $qemubin: $!";
-                # File::Copy does not retain permissions but on some
-                # platforms (like Travis CI) the binfmt interpreter must
-                # have the executable bit set or otherwise execve will
-                # fail with EACCES
-                chmod 0755, "$options->{root}/$qemubin"
-                  or error "cannot chmod $qemubin: $!";
-            }
+    # foreign architecture setup for fakechroot mode
+    if (defined $options->{qemu} && $options->{mode} eq 'fakechroot') {
+        # Make sure that the fakeroot and fakechroot shared libraries exist for
+        # the right architecture
+        open my $fh, '-|', 'dpkg-architecture', '-a',
+          $options->{nativearch},
+          '-qDEB_HOST_MULTIARCH' // error "failed to fork(): $!";
+        chomp(
+            my $deb_host_multiarch = do { local $/; <$fh> }
+        );
+        close $fh;
+        if (($? != 0) or (!$deb_host_multiarch)) {
+            error "dpkg-architecture failed: $?";
+        }
+        my $fakechrootdir = "/usr/lib/$deb_host_multiarch/fakechroot";
+        if (!-e "$fakechrootdir/libfakechroot.so") {
+            error "$fakechrootdir/libfakechroot.so doesn't exist."
+              . " Install libfakechroot:$options->{nativearch}"
+              . " outside the chroot";
+        }
+        my $fakerootdir = "/usr/lib/$deb_host_multiarch/libfakeroot";
+        if (!-e "$fakerootdir/libfakeroot-sysv.so") {
+            error "$fakerootdir/libfakeroot-sysv.so doesn't exist."
+              . " Install libfakeroot:$options->{nativearch}"
+              . " outside the chroot";
+        }
+
+        # The rest of this block sets environment variables, so we have to add
+        # the "no critic" statement to stop perlcritic from complaining about
+        # setting global variables
+        ## no critic (Variables::RequireLocalizedPunctuationVars)
+        # fakechroot only fills LD_LIBRARY_PATH with the directories of the
+        # host's architecture. We append the directories of the chroot
+        # architecture.
+        $ENV{LD_LIBRARY_PATH}
+          = "$ENV{LD_LIBRARY_PATH}:$fakechrootdir:$fakerootdir";
+        # The binfmt support on the outside is used, so qemu needs to know
+        # where it has to look for shared libraries
+        if (defined $ENV{QEMU_LD_PREFIX}
+            && $ENV{QEMU_LD_PREFIX} ne "") {
+            $ENV{QEMU_LD_PREFIX} = "$ENV{QEMU_LD_PREFIX}:$options->{root}";
         } else {
-            error "unknown mode: $options->{mode}";
+            $ENV{QEMU_LD_PREFIX} = $options->{root};
         }
     }
 
@@ -2992,15 +2965,15 @@ sub run_install() {
 
     my @pkgs_to_install = (@{ $options->{include} });
     if ($options->{variant} eq 'buildd') {
-        push @pkgs_to_install, 'build-essential';
+        push @pkgs_to_install, 'build-essential', 'apt';
     }
     if (any { $_ eq $options->{variant} }
-        ('required', 'important', 'standard', 'buildd')) {
+        ('required', 'important', 'standard')) {
         # Many of the priority:required packages are also essential:yes. We
         # make sure not to select those here to avoid useless "xxx is already
         # the newest version" messages.
         my $priority;
-        if (any { $_ eq $options->{variant} } ('required', 'buildd')) {
+        if (any { $_ eq $options->{variant} } ('required')) {
             $priority = '?and(?priority(required),?not(?essential))';
         } elsif ($options->{variant} eq 'important') {
             $priority = '?and(?or(?priority(required),?priority(important)),'
@@ -3169,7 +3142,7 @@ sub run_cleanup() {
         }
 
         if (any { $_ eq 'cleanup/mmdebstrap/qemu' } @{ $options->{skip} }) {
-            info "skipping cleanup/mmdebstrap/qume as requested";
+            info "skipping cleanup/mmdebstrap/qemu as requested";
         } elsif (defined $options->{qemu}
             and any { $_ eq $options->{mode} } ('root', 'unshare')
               and -e "$options->{root}/usr/bin/qemu-$options->{qemu}-static") {
@@ -3258,6 +3231,52 @@ sub run_cleanup() {
             closedir($dh);
         }
     }
+
+    if (any { $_ eq 'cleanup/dev' } @{ $options->{skip} }) {
+        info "skipping cleanup/dev as requested";
+    } else {
+
+        # By default, tar is run with --exclude=./dev because we create the
+        # ./dev entries ourselves using @devfiles. But if --skip=output/dev is
+        # used, --exclude=./dev is not passed so that the chroot includes ./dev
+        # as created by base-files. But if mknod was available (for example
+        # when running as root) then ./dev will also include the @devfiles
+        # entries created by run_setup() and thus the resulting tarball will
+        # include things inside ./dev despite the user having supplied
+        # --skip=output/dev. So if --skip=output/dev was passed and if a
+        # tarball is to be created, we need to make sure to clean up the
+        # ./dev entries that were created in run_setup(). This is not done
+        # when creating a directory because in that case we want to do the
+        # same as debootstrap and create a directory including device nodes.
+        if ($options->{format} ne 'directory' && any { $_ eq 'output/dev' }
+            @{ $options->{skip} }) {
+            foreach my $file (@devfiles) {
+                my ($fname, $mode, $type, $linkname, $devmajor, $devminor)
+                  = @{$file};
+                if (!-e "$options->{root}/dev/$fname") {
+                    next;
+                }
+                # do not remove ./dev itself
+                if ($fname eq "") {
+                    next;
+                }
+                if ($type == 0) {    # normal file
+                    error "type 0 not implemented";
+                } elsif ($type == 1) {    # hardlink
+                    error "type 1 not implemented";
+                } elsif (any { $_ eq $type } (2, 3, 4))
+                {                         # symlink, char, block
+                    unlink "$options->{root}/dev/$fname"
+                      or error "failed to unlink ./dev/$fname: $!";
+                } elsif ($type == 5) {    # directory
+                    rmdir "$options->{root}/dev/$fname"
+                      or error "failed to unlink ./dev/$fname: $!";
+                } else {
+                    error "unsupported type: $type";
+                }
+            }
+        }
+    }
     return;
 }
 
@@ -3340,8 +3359,20 @@ sub pivot_root {
 }
 
 sub hookhelper {
-    my ($root, $mode, $hook, $qemu, $verbosity, $command, @args) = @_;
+    my ($root, $mode, $hook, $skipopt, $verbosity, $command, @args) = @_;
     $verbosity_level = $verbosity;
+    my @skipopts = ();
+    if (length $skipopt) {
+        for my $skip (split /[,\s]+/, $skipopt) {
+            # strip leading and trailing whitespace
+            $skip =~ s/^\s+|\s+$//g;
+            # skip if the remainder is an empty string
+            if ($skip eq '') {
+                next;
+            }
+            push @skipopts, $skip;
+        }
+    }
     # we put everything in an eval block because that way we can easily handle
     # errors without goto labels or much code duplication: the error handler
     # has to send an "error" message to the other side
@@ -3430,8 +3461,48 @@ sub hookhelper {
                         @cmdprefix,    @tarcmd,    '--xattrs-include=*',
                         '--directory', $directory, '--extract', '--file', '-'
                     );
-                    debug("helper: running " . (join " ", @cmd));
-                    open($fh, '|-', @cmd) // error "failed to fork(): $!";
+                    # go via mmtarfilter if copy-in/mknod, tar-in/mknod or
+                    # sync-in/mknod were part of the skip options
+                    if (any { $_ eq "$command/mknod" } @skipopts) {
+                        info "skipping $command/mknod as requested";
+                        my $tarfilter = "mmtarfilter";
+                        if (-x "./tarfilter") {
+                            $tarfilter = "./tarfilter";
+                        }
+                        pipe my $filter_reader, $fh or error "pipe failed: $!";
+                        pipe my $tar_reader, my $filter_writer
+                          or error "pipe failed: $!";
+                        my $pid1 = fork() // error "fork() failed: $!";
+                        if ($pid1 == 0) {
+                            open(STDIN, '<&', $filter_reader)
+                              or error "cannot open STDIN: $!";
+                            open(STDOUT, '>&', $filter_writer)
+                              or error "cannot open STDOUT: $!";
+                            close($tar_reader)
+                              or error "cannot close tar_reader: $!";
+                            debug(
+                                "helper: running $tarfilter --type-exclude=3 "
+                                  . "--type-exclude=4");
+                            eval { Devel::Cover::set_coverage("none") }
+                              if $is_covering;
+                            exec $tarfilter, '--type-exclude=3',
+                              '--type-exclude=4';
+                        }
+                        my $pid2 = fork() // error "fork() failed: $!";
+                        if ($pid2 == 0) {
+                            open(STDIN, '<&', $tar_reader)
+                              or error "cannot open STDIN: $!";
+                            close($filter_writer)
+                              or error "cannot close filter_writer: $!";
+                            debug("helper: running " . (join " ", @cmd));
+                            eval { Devel::Cover::set_coverage("none") }
+                              if $is_covering;
+                            exec { $cmd[0] } @cmd;
+                        }
+                    } else {
+                        debug("helper: running " . (join " ", @cmd));
+                        open($fh, '|-', @cmd) // error "failed to fork(): $!";
+                    }
                 } else {
                     error "unknown command: $command";
                 }
@@ -3951,13 +4022,15 @@ sub hooklistener {
                 if ($? != 0) {
                     error "tar failed";
                 }
+            } elsif ($msg eq "error") {
+                error "received error on socket";
             } else {
                 error "unknown message: $msg";
             }
         }
     };
     if ($@) {
-        debug("hooklistener errored out: $@");
+        warning("hooklistener errored out: $@");
         # inform the other side that something went wrong
         print STDOUT (pack("n", 0) . "error")
           or error "cannot write to socket: $!";
@@ -4441,6 +4514,7 @@ sub main() {
         include         => [],
         architectures   => [$hostarch],
         mode            => 'auto',
+        format          => 'auto',
         dpkgopts        => [],
         aptopts         => [],
         apttrusted      => $apttrusted,
@@ -4454,7 +4528,6 @@ sub main() {
         skip            => [],
     };
     my $logfile = undef;
-    my $format  = 'auto';
     Getopt::Long::Configure('default', 'bundling', 'auto_abbrev',
         'ignore_case_always');
     GetOptions(
@@ -4537,7 +4610,7 @@ sub main() {
         'q|quiet'   => sub { $verbosity_level = 0; },
         'v|verbose' => sub { $verbosity_level = 2; },
         'd|debug'   => sub { $verbosity_level = 3; },
-        'format=s'  => \$format,
+        'format=s'  => \$options->{format},
         'logfile=s' => \$logfile,
         # no-op options so that mmdebstrap can be used with
         # sbuild-createchroot --debootstrap=mmdebstrap
@@ -4704,16 +4777,16 @@ sub main() {
     }
 
     # sqfs is an alias for squashfs
-    if ($format eq 'sqfs') {
-        $format = 'squashfs';
+    if ($options->{format} eq 'sqfs') {
+        $options->{format} = 'squashfs';
     }
     # dir is an alias for directory
-    if ($format eq 'dir') {
-        $format = 'directory';
+    if ($options->{format} eq 'dir') {
+        $options->{format} = 'directory';
     }
     my @valid_formats
       = ('auto', 'directory', 'tar', 'squashfs', 'ext2', 'null');
-    if (none { $_ eq $format } @valid_formats) {
+    if (none { $_ eq $options->{format} } @valid_formats) {
         error "invalid format. Choose from " . (join ', ', @valid_formats);
     }
 
@@ -5480,7 +5553,7 @@ sub main() {
     my $tar_compressor = get_tar_compressor($options->{target});
 
     # figure out the right format
-    if ($format eq 'auto') {
+    if ($options->{format} eq 'auto') {
         # (stat(...))[6] is the device identifier which contains the major and
         # minor numbers for character special files
         # major 1 and minor 3 is /dev/null on Linux
@@ -5489,7 +5562,7 @@ sub main() {
             and -c '/dev/null'
             and major((stat("/dev/null"))[6]) == 1
             and minor((stat("/dev/null"))[6]) == 3) {
-            $format = 'null';
+            $options->{format} = 'null';
         } elsif ($options->{target} eq '-'
             and $OSNAME eq 'linux'
             and major((stat(STDOUT))[6]) == 1
@@ -5497,9 +5570,9 @@ sub main() {
             # by checking the major and minor number of the STDOUT fd we also
             # can detect redirections to /dev/null and choose the null format
             # accordingly
-            $format = 'null';
+            $options->{format} = 'null';
         } elsif ($options->{target} ne '-' and -d $options->{target}) {
-            $format = 'directory';
+            $options->{format} = 'directory';
         } elsif (
             defined $tar_compressor
             or $options->{target} =~ /\.tar$/
@@ -5507,7 +5580,7 @@ sub main() {
             or -p $options->{target}    # named pipe (fifo)
             or -c $options->{target}    # character special like /dev/null
         ) {
-            $format = 'tar';
+            $options->{format} = 'tar';
             # check if the compressor is installed
             if (defined $tar_compressor) {
                 my $pid = fork() // error "fork() failed: $!";
@@ -5527,7 +5600,7 @@ sub main() {
                 }
             }
         } elsif ($options->{target} =~ /\.(squashfs|sqfs)$/) {
-            $format = 'squashfs';
+            $options->{format} = 'squashfs';
             # check if tar2sqfs is installed
             my $pid = fork() // error "fork() failed: $!";
             if ($pid == 0) {
@@ -5543,7 +5616,7 @@ sub main() {
                 error("failed to start tar2sqfs --version");
             }
         } elsif ($options->{target} =~ /\.ext2$/) {
-            $format = 'ext2';
+            $options->{format} = 'ext2';
             # check if the installed version of genext2fs supports tarballs on
             # stdin
             (undef, my $filename) = tempfile(
@@ -5564,32 +5637,34 @@ sub main() {
                 error "genext2fs failed with exit status: $exitstatus";
             }
         } else {
-            $format = 'directory';
+            $options->{format} = 'directory';
         }
-        info "automatically chosen format: $format";
+        info "automatically chosen format: $options->{format}";
     }
 
-    if ($options->{target} eq '-' and $format ne 'tar' and $format ne 'null') {
-        error "the $format format is unable to write to standard output";
+    if (    $options->{target} eq '-'
+        and $options->{format} ne 'tar'
+        and $options->{format} ne 'null') {
+        error "the $options->{format} format is unable to write to stdout";
     }
 
-    if ($format eq 'null'
+    if ($options->{format} eq 'null'
         and none { $_ eq $options->{target} } ('-', '/dev/null')) {
         info "ignoring target $options->{target} with null format";
     }
 
-    if ($format eq 'ext2') {
+    if ($options->{format} eq 'ext2') {
         if (!can_execute 'genext2fs') {
             error "need genext2fs for ext2 format";
         }
-    } elsif ($format eq 'squashfs') {
+    } elsif ($options->{format} eq 'squashfs') {
         if (!can_execute 'tar2sqfs') {
             error "need tar2sqfs binary from the squashfs-tools-ng package";
         }
     }
 
-    if (any { $_ eq $format } ('tar', 'squashfs', 'ext2', 'null')) {
-        if ($format ne 'null') {
+    if (any { $_ eq $options->{format} } ('tar', 'squashfs', 'ext2', 'null')) {
+        if ($options->{format} ne 'null') {
             if (any { $_ eq $options->{variant} } ('extract', 'custom')
                   and $options->{mode} eq 'fakechroot') {
                 info "creating a tarball or squashfs image or ext2 image in"
@@ -5626,7 +5701,7 @@ sub main() {
         ) {
             chmod 0755, $options->{root} or error "cannot chmod root: $!";
         }
-    } elsif ($format eq 'directory') {
+    } elsif ($options->{format} eq 'directory') {
         # user does not seem to have specified a tarball as output, thus work
         # directly in the supplied directory
         $options->{root} = $options->{target};
@@ -5682,7 +5757,7 @@ sub main() {
             }
         }
     } else {
-        error "unknown format: $format";
+        error "unknown format: $options->{format}";
     }
 
     # check for double quotes because apt doesn't allow to escape them and
@@ -5766,14 +5841,27 @@ sub main() {
         error "unknown mode: $options->{mode}";
     }
 
+    # If a tarball is to be created, we always (except if --skip=output/dev is
+    # passed) craft the /dev entries ourselves.
+    # Why do we put /dev entries in the final tarball?
+    #  - because debootstrap does it
+    #  - because schroot (#856877) and pbuilder rely on it and we care about
+    #    Debian buildds (using schroot) and reproducible builds infra (using
+    #    pbuilder)
+    # If both the above assertion change, we can stop creating /dev entries as
+    # well.
     my $devtar = '';
-    # We always craft the /dev entries ourselves if a tarball is to be created
-    if (any { $_ eq $format } ('tar', 'squashfs', 'ext2')) {
+    if (any { $_ eq $options->{format} } ('tar', 'squashfs', 'ext2')) {
         foreach my $file (@devfiles) {
             my ($fname, $mode, $type, $linkname, $devmajor, $devminor)
               = @{$file};
             if (length "./dev/$fname" > 100) {
                 error "tar entry cannot exceed 100 characters";
+            }
+            if ($type == 3
+                and any { $_ eq 'output/mknod' } @{ $options->{skip} }) {
+                info "skipping output/mknod as requested for ./dev/$fname";
+                next;
             }
             my $entry = pack(
                 'a100 a8 a8 a8 a12 a12 A8 a1 a100 a8 a32 a32 a8 a8 a155 x12',
@@ -5798,10 +5886,10 @@ sub main() {
               = sprintf("%06o\0", unpack("%16C*", $entry));
             $devtar .= $entry;
         }
-    } elsif (any { $_ eq $format } ('directory', 'null')) {
+    } elsif (any { $_ eq $options->{format} } ('directory', 'null')) {
         # nothing to do
     } else {
-        error "unknown format: $format";
+        error "unknown format: $options->{format}";
     }
 
     my $exitstatus = 0;
@@ -5814,10 +5902,14 @@ sub main() {
         '--format=pax',
         '--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime',
         '-c',
-        '--exclude=./dev'
+        '--exclude=./lost+found'
     );
+    # only exclude ./dev if device nodes are written out (the default)
+    if (none { $_ eq 'output/dev' } @{ $options->{skip} }) {
+        push @taropts, '--exclude=./dev';
+    }
     # tar2sqfs and genext2fs do not support extended attributes
-    if ($format eq "squashfs") {
+    if ($options->{format} eq "squashfs") {
         # tar2sqfs supports user.*, trusted.* and security.* but not system.*
         # https://bugs.debian.org/988100
         # lib/sqfs/xattr/xattr.c of https://github.com/AgentD/squashfs-tools-ng
@@ -5826,7 +5918,7 @@ sub main() {
         warning("tar2sqfs does not support extended attributes"
               . " from the 'system' namespace");
         push @taropts, '--xattrs', '--xattrs-exclude=system.*';
-    } elsif ($format eq "ext2") {
+    } elsif ($options->{format} eq "ext2") {
         warning "genext2fs does not support extended attributes";
     } else {
         push @taropts, '--xattrs';
@@ -5878,7 +5970,7 @@ sub main() {
                 close $childsock;
 
                 close $nblkreader;
-                if (!$options->{dryrun} && $format eq 'ext2') {
+                if (!$options->{dryrun} && $options->{format} eq 'ext2') {
                     my $numblocks = approx_disk_usage($options->{root});
                     print $nblkwriter "$numblocks\n";
                     $nblkwriter->flush();
@@ -5887,7 +5979,8 @@ sub main() {
 
                 if ($options->{dryrun}) {
                     info "simulate creating tarball...";
-                } elsif (any { $_ eq $format } ('tar', 'squashfs', 'ext2')) {
+                } elsif (any { $_ eq $options->{format} }
+                    ('tar', 'squashfs', 'ext2')) {
                     info "creating tarball...";
 
                     # redirect tar output to the writing end of the pipe so
@@ -5908,10 +6001,11 @@ sub main() {
                       or error "tar failed: $?";
 
                     info "done";
-                } elsif (any { $_ eq $format } ('directory', 'null')) {
+                } elsif (any { $_ eq $options->{format} }
+                    ('directory', 'null')) {
                     # nothing to do
                 } else {
-                    error "unknown format: $format";
+                    error "unknown format: $options->{format}";
                 }
 
                 exit 0;
@@ -5943,7 +6037,7 @@ sub main() {
             close $childsock;
 
             close $nblkreader;
-            if (!$options->{dryrun} && $format eq 'ext2') {
+            if (!$options->{dryrun} && $options->{format} eq 'ext2') {
                 my $numblocks = approx_disk_usage($options->{root});
                 print $nblkwriter $numblocks;
                 $nblkwriter->flush();
@@ -5952,7 +6046,8 @@ sub main() {
 
             if ($options->{dryrun}) {
                 info "simulate creating tarball...";
-            } elsif (any { $_ eq $format } ('tar', 'squashfs', 'ext2')) {
+            } elsif (any { $_ eq $options->{format} }
+                ('tar', 'squashfs', 'ext2')) {
                 info "creating tarball...";
 
                 # redirect tar output to the writing end of the pipe so that
@@ -6000,10 +6095,10 @@ sub main() {
                 }
 
                 info "done";
-            } elsif (any { $_ eq $format } ('directory', 'null')) {
+            } elsif (any { $_ eq $options->{format} } ('directory', 'null')) {
                 # nothing to do
             } else {
-                error "unknown format: $format";
+                error "unknown format: $options->{format}";
             }
 
             exit 0;
@@ -6061,7 +6156,7 @@ sub main() {
 
     my $numblocks = 0;
     close $nblkwriter;
-    if (!$options->{dryrun} && $format eq 'ext2') {
+    if (!$options->{dryrun} && $options->{format} eq 'ext2') {
         $numblocks = <$nblkreader>;
         if (defined $numblocks) {
             chomp $numblocks;
@@ -6078,9 +6173,11 @@ sub main() {
 
     if ($options->{dryrun}) {
         # nothing to do
-    } elsif (any { $_ eq $format } ('directory', 'null')) {
+    } elsif (any { $_ eq $options->{format} } ('directory', 'null')) {
         # nothing to do
-    } elsif (any { $_ eq $format } ('tar', 'squashfs', 'ext2')) {
+    } elsif ($options->{format} eq 'ext2' && $numblocks <= 0) {
+        # nothing to do because of invalid $numblocks
+    } elsif (any { $_ eq $options->{format} } ('tar', 'squashfs', 'ext2')) {
         # we use eval() so that error() doesn't take this process down and
         # thus leaves the setup() process without a parent
         eval {
@@ -6089,27 +6186,27 @@ sub main() {
                     error "cannot copy to standard output: $!";
                 }
             } else {
-                if (   $format eq 'squashfs'
-                    or $format eq 'ext2'
+                if (   $options->{format} eq 'squashfs'
+                    or $options->{format} eq 'ext2'
                     or defined $tar_compressor) {
                     my @argv = ();
-                    if ($format eq 'squashfs') {
+                    if ($options->{format} eq 'squashfs') {
                         push @argv, 'tar2sqfs',
                           '--quiet', '--no-skip', '--force',
                           '--exportable',
                           '--compressor', 'xz',
                           '--block-size', '1048576',
                           $options->{target};
-                    } elsif ($format eq 'ext2') {
+                    } elsif ($options->{format} eq 'ext2') {
                         if ($numblocks <= 0) {
                             error "invalid number of blocks: $numblocks";
                         }
                         push @argv, 'genext2fs', '-B', 1024, '-b', $numblocks,
                           '-i', '16384', '-a', '-', $options->{target};
-                    } elsif ($format eq 'tar') {
+                    } elsif ($options->{format} eq 'tar') {
                         push @argv, @{$tar_compressor};
                     } else {
-                        error "unknown format: $format";
+                        error "unknown format: $options->{format}";
                     }
                     POSIX::sigprocmask(SIG_BLOCK, $sigset)
                       or error "Can't block signals: $!";
@@ -6127,15 +6224,16 @@ sub main() {
                           or error "Can't unblock signals: $!";
 
                         # redirect stdout to file or /dev/null
-                        if ($format eq 'squashfs' or $format eq 'ext2') {
+                        if (   $options->{format} eq 'squashfs'
+                            or $options->{format} eq 'ext2') {
                             open(STDOUT, '>', '/dev/null')
                               or error "cannot open /dev/null for writing: $!";
-                        } elsif ($format eq 'tar') {
+                        } elsif ($options->{format} eq 'tar') {
                             open(STDOUT, '>', $options->{target})
                               or error
                               "cannot open $options->{target} for writing: $!";
                         } else {
-                            error "unknown format: $format";
+                            error "unknown format: $options->{format}";
                         }
                         open(STDIN, '<&', $rfh)
                           or error "cannot open file handle for reading: $!";
@@ -6167,12 +6265,34 @@ sub main() {
             # running tar and this process itself) to reliably tear down
             # all running child processes. The main process is not affected
             # because we are ignoring SIGHUP.
+            #
+            # FIXME: this codepath becomes dangerous in case mmdebstrap is not
+            # run in its own process group. When run from the terminal, the
+            # shell creates a new process group as part of its job control, so
+            # sending SIGHUP to all processes in our own process group should
+            # not be dangerous.  But for example, on debci, lxc will run in the
+            # same process group as mmdebstrap and sending SIGHUP to the whole
+            # process group will also kill lxc. Creating a new process group
+            # for $pid will break things because only the foreground job is
+            # allowed to read from the terminal.  If a background job does it,
+            # i will be suspended with SIGTTIN.  Even though apt could be told
+            # to not read from the terminal by opening STDIN from /dev/null,
+            # this would make --chrooted-customize-hook=bash impossible.
+            # Making the $pid process group the foreground job will destroy all
+            # the signal handling we have set up for when the user presses
+            # ctrl+c in a terminal. Even if we fix the signal handling we now
+            # find ourselves in the opposite situation: the $pid process must
+            # now clean up the former main process tree reliably. And we cannot
+            # create a new process group for everything all-in-one because that
+            # would also destroy CTRL+C handling from the terminal.
             warning "creating tarball failed: $@";
-            kill HUP => -getpgrp();
+            my $pgroup = getpgrp();
+            warning "sending SIGHUP to all processes in process group $pgroup";
+            kill HUP => -$pgroup;
             $exitstatus = 1;
         }
     } else {
-        error "unknown format: $format";
+        error "unknown format: $options->{format}";
     }
     close($rfh);
     waitpid $pid, 0;
@@ -6183,9 +6303,10 @@ sub main() {
     # change signal handler message
     $waiting_for = "cleanup";
 
-    if (any { $_ eq $format } ('directory')) {
+    if (any { $_ eq $options->{format} } ('directory')) {
         # nothing to do
-    } elsif (any { $_ eq $format } ('tar', 'squashfs', 'ext2', 'null')) {
+    } elsif (any { $_ eq $options->{format} }
+        ('tar', 'squashfs', 'ext2', 'null')) {
         if (!-e $options->{root}) {
             error "$options->{root} does not exist";
         }
@@ -6233,7 +6354,7 @@ sub main() {
             error "unknown mode: $options->{mode}";
         }
     } else {
-        error "unknown format: $format";
+        error "unknown format: $options->{format}";
     }
 
     if ($got_signal) {
@@ -6271,24 +6392,24 @@ dependencies and is thus able to use more than one mirror and resolve more
 complex dependencies. See section B<OPERATION> for an overview of how
 B<mmdebstrap> works internally.
 
-If no I<MIRROR> option is provided, L<http://deb.debian.org/debian> is used.
-If I<SUITE> is a stable release name and no I<MIRROR> is specified, then
-mirrors for updates and security are automatically added. If a I<MIRROR>
-option starts with "deb " or "deb-src " then it is used as a one-line-style
-format entry for apt's sources.list inside the chroot.  If a I<MIRROR> option
-contains a "://" then it is interpreted as a mirror URI and the apt line
-inside the chroot is assembled as "deb [arch=A] B C D" where A is the host's
-native architecture, B is the I<MIRROR>, C is the given I<SUITE> and D is the
-components given via B<--components> (defaults to "main"). If a I<MIRROR>
-option happens to be an existing file, then its contents are pasted into the
-chroot's sources.list.  This can be used to supply a deb822 style
-sources.list. If I<MIRROR> is C<-> then standard input is pasted into the
-chroot's sources.list.  More than one mirror can be specified and are appended
-to the chroot's sources.list in the given order. If you specify a https or tor
-I<MIRROR> and you want the chroot to be able to update itself, don't forget to
-also install the ca-certificates package, the apt-transport-https package for
-apt versions less than 1.5 and/or the apt-transport-tor package using the
-B<--include> option, as necessary.
+If no I<MIRROR> option is provided and I<SUITE> is not a stable release name,
+L<http://deb.debian.org/debian> is used.  If I<SUITE> is a stable release name
+and no I<MIRROR> is specified, then mirrors for updates and security are
+automatically added. If a I<MIRROR> option starts with "deb " or "deb-src "
+then it is used as a one-line-style format entry for apt's sources.list inside
+the chroot.  If a I<MIRROR> option contains a "://" then it is interpreted as a
+mirror URI and the apt line inside the chroot is assembled as "deb [arch=A] B C
+D" where A is the host's native architecture, B is the I<MIRROR>, C is the
+given I<SUITE> and D is the components given via B<--components> (defaults to
+"main"). If a I<MIRROR> option happens to be an existing file, then its
+contents are pasted into the chroot's sources.list.  This can be used to supply
+a deb822 style sources.list. If I<MIRROR> is C<-> then standard input is pasted
+into the chroot's sources.list.  More than one mirror can be specified and are
+appended to the chroot's sources.list in the given order. If you specify a
+https or tor I<MIRROR> and you want the chroot to be able to update itself,
+don't forget to also install the ca-certificates package, the
+apt-transport-https package for apt versions less than 1.5 and/or the
+apt-transport-tor package using the B<--include> option, as necessary.
 
 The optional I<TARGET> argument can either be the path to a directory, the path
 to a tarball filename, the path to a squashfs image, the path to an ext2 image,
@@ -6572,6 +6693,10 @@ installed. At that point, the chroot directory does not contain any
 executables and thus cannot be chroot-ed into. See section B<HOOKS> for more
 information.
 
+Example: add additional apt sources entries on top of the default ones:
+
+    --setup-hook='echo "deb http..." > "$1"/etc/apt/sources.list.d/custom.list'
+
 Example: Setup chroot for installing a sub-essential busybox-based chroot
 with --variant=custom
 --include=dpkg,busybox,libc-bin,base-files,base-passwd,debianutils
@@ -6622,15 +6747,23 @@ Execute arbitrary I<command>s after the chroot is set up and all packages got
 installed but before final cleanup actions are carried out. See section
 B<HOOKS> for more information.
 
-Example: Preparing a chroot for use with autopkgtest
+Example: Add a user without a password
 
-    --customize-hook='chroot "$1" passwd --delete root'
     --customize-hook='chroot "$1" useradd --home-dir /home/user
         --create-home user'
     --customize-hook='chroot "$1" passwd --delete user'
+
+Example: set up F</etc/hostname> and F</etc/hosts>
+
     --customize-hook='echo host > "$1/etc/hostname"'
     --customize-hook='echo "127.0.0.1 localhost host" > "$1/etc/hosts"'
-    --customize-hook=/usr/share/autopkgtest/setup-commands/setup-testbed
+
+Example: to mimic B<debootstrap> behaviour, B<mmdebstrap> copies from the host.
+Remove them in a B<--customize-hook> to make the chroot reproducible across
+multiple hosts:
+
+    --customize-hook='rm "$1"/etc/resolv.conf'
+    --customize-hook='rm "$1"/etc/hostname'
 
 =item B<--hook-directory>=I<directory>
 
@@ -6725,7 +6858,7 @@ This mode directly executes chroot and is the same mode of operation as is
 used by debootstrap. It is the only mode that can directly create a directory
 chroot with the right permissions. If the chroot directory is not accessible
 by the _apt user, then apt sandboxing will be automatically disabled. This mode
-needs to be able to mount and thus requires C<SYS_CAP_ADMIN>.
+needs to be able to mount and thus requires C<CAP_SYS_ADMIN>.
 
 =item B<unshare>
 
@@ -6966,9 +7099,9 @@ to all four of them. Any information specific to each hook is documented under
 the specific hook options in the section B<OPTIONS>.
 
 The options can be specified multiple times and the commands are executed in
-the order in which they are given on the command line. There are four
-different types of hook option arguments. If the argument passed to the hook
-option starts with C<copy-in>, C<copy-out>, C<tar-in>, C<tar-out>, C<upload> or
+the order in which they are given on the command line. There are four different
+types of hook option arguments. If the argument passed to the hook option
+starts with C<copy-in>, C<copy-out>, C<tar-in>, C<tar-out>, C<upload> or
 C<download> followed by a space, then the hook is interpreted as a special
 hook. Otherwise, if I<command> is an existing executable file from C<$PATH> or
 if I<command> does not contain any shell metacharacters, then I<command> is
@@ -6981,11 +7114,12 @@ C<APT_CONFIG> as written by mmdebstrap it can be found in the
 C<MMDEBSTRAP_APT_CONFIG> environment variable. All environment variables set by
 the user are preserved, except for C<TMPDIR> which is cleared. See section
 B<TMPDIR>. Furthermore, C<MMDEBSTRAP_MODE> will store the mode set by
-B<--mode>, C<MMDEBSTRAP_HOOK> stores which hook is currently run (setup,
-extract, essential, customize), C<MMDEBSTRAP_ARGV0> stores the name of the
-binary with which B<mmdebstrap> was executed and C<MMDEBSTRAP_VERBOSITY> stores
-the numerical verbosity level (0 for no output, 1 for normal, 2 for verbose and
-3 for debug output). The C<MMDEBSTRAP_INCLUDE> variable stores the list of
+B<--mode>, C<MMDEBSTRAP_FORMAT> stores the format chosen by B<--format>,
+C<MMDEBSTRAP_HOOK> stores which hook is currently run (setup, extract,
+essential, customize), C<MMDEBSTRAP_ARGV0> stores the name of the binary with
+which B<mmdebstrap> was executed and C<MMDEBSTRAP_VERBOSITY> stores the
+numerical verbosity level (0 for no output, 1 for normal, 2 for verbose and 3
+for debug output). The C<MMDEBSTRAP_INCLUDE> variable stores the list of
 packages, apt patterns or file paths given by the B<--include> option,
 separated by a comma and with commas and percent signs in the option values
 urlencoded. If I<SUITE> name was supplied, it's stored in C<MMDEBSTRAP_SUITE>.
@@ -7034,7 +7168,9 @@ only update the content of an existing directory.
 =item B<tar-in> I<outside.tar> I<pathinside>
 
 Unpacks a tarball I<outside.tar> from outside the chroot into a certain
-location I<pathinside> inside the chroot.
+location I<pathinside> inside the chroot. In B<unshare> mode, device nodes
+cannot be created. To ignore device nodes in tarballs, use
+B<--skip=tar-in/mknod>.
 
 =item B<tar-out> I<pathinside> I<outside.tar>
 
@@ -7247,9 +7383,20 @@ Performs cleanup tasks, unless B<--skip=cleanup> is used:
 
 =back
 
+=item B<output>
+
 For formats other than B<directory>, pack up the temporary chroot directory
 into a tarball, ext2 image or squashfs image and delete the temporary chroot
 directory.
+
+If B<--skip=output/dev> is added, the resulting chroot will not contain the
+device nodes, directories and symlinks that B<debootstrap> creates but just
+an empty /dev as created by B<base-files>.
+
+If B<--skip=output/mknod> is added, the resulting chroot will not contain
+device nodes (neither block nor character special devices). This is useful
+if the chroot tarball is to be exatracted in environments where mknod does
+not function like in unshared user namespaces.
 
 =back
 
@@ -7378,7 +7525,14 @@ sources on the current system:
             --wildcards './usr/src/libdvd-pkg/libdvdcss2_*_*.deb'
     $ ls libdvdcss2_*_*.deb
 
-Use as replacement for autopkgtest-build-qemu and vmdb2:
+Use as replacement for autopkgtest-build-qemu and vmdb2 for all architectures
+supporting EFI booting (amd64, arm64, armhf, i386, riscv64), use a convenience
+wrapper around B<mmdebstrap>:
+
+    $ mmdebstrap-autopkgtest-build-qemu unstable ./autopkgtest.img
+
+Use as replacement for autopkgtest-build-qemu and vmdb2 on architectures
+supporting extlinux (amd64 and i386):
 
     $ mmdebstrap --variant=important --include=linux-image-amd64 \
         --customize-hook='chroot "$1" passwd --delete root' \
@@ -7410,7 +7564,7 @@ As a debootstrap wrapper to run it without superuser privileges but using Linux
 user namespaces instead. This fixes Debian bug #829134.
 
     $ mmdebstrap --variant=custom --mode=unshare \
-        --setup-hook='env container=lxc debootstrap unstable "$1"' \
+        --setup-hook='debootstrap unstable "$1"' \
         - debian-debootstrap.tar
 
 Build a non-Debian chroot like Ubuntu bionic:
@@ -7455,6 +7609,12 @@ Create a system that can be used with docker:
     root
     $ sudo docker rmi debian
 
+Create and boot a qemu virtual machine for an arbitrary architecture using
+the B<debvm-create> wrapper script around B<mmdebstrap>:
+
+    $ debvm-create -r stable -- --architecture=riscv64
+    $ debvm-run
+
 Create a system that can be used with podman:
 
     $ mmdebstrap unstable | podman import - debian
@@ -7465,9 +7625,9 @@ Create a system that can be used with podman:
 
 As a docker/podman replacement:
 
-    $ mmdebstrap unstable | mmtarfilter --path-exclude='/dev/*' > chroot.tar
+    $ mmdebstrap unstable chroot.tar
     [...]
-    $ mmdebstrap --variant=custom --skip=update \
+    $ mmdebstrap --variant=custom --skip=update,tar-in/mknod \
         --setup-hook='tar-in chroot.tar /' \
         --customize-hook='chroot "$1" whoami' unstable /dev/null
     [...]
@@ -7480,8 +7640,8 @@ installed, then instead of downloading and installing the essential packages
 twice you can instead build on top of the already present minimal chroot:
 
     $ mmdebstrap --variant=apt unstable chroot.tar
-    $ mmdebstrap --variant=custom --setup-hook \
-        'mmtarfilter "--path-exclude=/dev/*" < chroot.tar | tar -C "$1" -x' \
+    $ mmdebstrap --variant=custom --skip=update,setup,cleanup,tar-in/mknod \
+        --setup-hook='tar-in chroot.tar /' \
         --customize-hook='chroot "$1" apt-get install --yes pkg1 pkg2' \
         '' chroot-full.tar
 

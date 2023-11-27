@@ -95,4 +95,11 @@ END
 	echo
 fi
 
+# check if the wiki has to be updated with pod2markdown output
+if [ "${DEBEMAIL:-}" = "josch@debian.org" ]; then
+	bash -exc "diff -u <(curl --silent https://gitlab.mister-muffin.de/josch/mmdebstrap/wiki/raw/Home | dos2unix) <(pod2markdown < mmdebstrap)" || :
+fi
+
 rm -f shared/test.sh shared/tar1.txt shared/tar2.txt shared/pkglist.txt shared/doc-debian.tar.list shared/mmdebstrap shared/tarfilter shared/proxysolver
+
+echo "$0 finished successfully" >&2

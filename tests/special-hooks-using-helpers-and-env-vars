@@ -8,12 +8,12 @@ echo "MMDEBSTRAP_APT_CONFIG $MMDEBSTRAP_APT_CONFIG"
 echo "$MMDEBSTRAP_HOOK" >> /tmp/hooks
 [ "$MMDEBSTRAP_MODE" = "root" ]
 echo test-content $MMDEBSTRAP_HOOK > test
-{{ CMD }} --hook-helper "$1" "$MMDEBSTRAP_MODE" "$MMDEBSTRAP_HOOK" env 1 upload test /test <&$MMDEBSTRAP_HOOKSOCK >&$MMDEBSTRAP_HOOKSOCK
+{{ CMD }} --hook-helper "$1" "$MMDEBSTRAP_MODE" "$MMDEBSTRAP_HOOK" '' 1 upload test /test <&$MMDEBSTRAP_HOOKSOCK >&$MMDEBSTRAP_HOOKSOCK
 rm test
 echo "content inside chroot:"
 cat "$1/test"
 [ "test-content $MMDEBSTRAP_HOOK" = "$(cat "$1/test")" ]
-{{ CMD }} --hook-helper "$1" "$MMDEBSTRAP_MODE" "$MMDEBSTRAP_HOOK" env 1 download /test test <&$MMDEBSTRAP_HOOKSOCK >&$MMDEBSTRAP_HOOKSOCK
+{{ CMD }} --hook-helper "$1" "$MMDEBSTRAP_MODE" "$MMDEBSTRAP_HOOK" '' 1 download /test test <&$MMDEBSTRAP_HOOKSOCK >&$MMDEBSTRAP_HOOKSOCK
 echo "content outside chroot:"
 cat test
 [ "test-content $MMDEBSTRAP_HOOK" = "$(cat test)" ]

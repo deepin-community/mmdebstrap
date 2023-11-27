@@ -35,15 +35,8 @@ if [ -n "$AUTOPROXY" ] && [ -x "$AUTOPROXY" ] && [ -e /tmp/.auto-apt-proxy-0 ]; 
 	chmod 644 "$TMP_APT_CONFIG"
 fi
 
-# debootstrap runs mount -t proc proc /proc which doesn't work in an unshared
-# namespace on privileged docker (like salsaci), so mount /proc manually
-# https://bugs.debian.org/1031222
-# https://salsa.debian.org/installer-team/debootstrap/-/merge_requests/91
 $prefix {{ CMD }} --variant=custom --mode={{ MODE }} \
-	--setup-hook='env '"${AUTOPROXY:+APT_CONFIG='$TMP_APT_CONFIG'}"' container=lxc debootstrap --variant={{ VARIANT }} unstable "$1" {{ MIRROR }}' \
-	--setup-hook='mount -o rbind /proc "$1/proc"' \
-	--setup-hook='chroot "$1" dpkg-reconfigure systemd || true' \
-	--setup-hook='umount --lazy "$1/proc"' \
+	--setup-hook='env '"${AUTOPROXY:+APT_CONFIG='$TMP_APT_CONFIG'}"' debootstrap --variant={{ VARIANT }} unstable "$1" {{ MIRROR }}' \
 	- /tmp/debian-mm.tar {{ MIRROR }}
 if [ -n "$AUTOPROXY" ] && [ -x "$AUTOPROXY" ] && [ -e /tmp/.auto-apt-proxy-0 ]; then
 	rm "$TMP_APT_CONFIG"

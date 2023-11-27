@@ -1,3 +1,21 @@
+1.4.0 (2023-10-24)
+------------------
+
+ - add mmdebstrap-autopkgtest-build-qemu
+ - export container=mmdebstrap-unshare env variable in unshare-mode hooks
+ - add new skip options: output/dev, output/mknod, tar-in/mknod,
+   copy-in/mknod, sync-in/mknod
+ - stop copying qemu-$arch-static binary into the chroot
+ - tarfilter: add --type-exclude option
+ - set MMDEBSTRAP_FORMAT in hooks
+ - do not install priority:required in buildd variant following debootstrap
+
+1.3.8 (2023-08-20)
+------------------
+
+ - hooks/merged-usr: implement post-merging as debootstrap does
+ - exclude ./lost+found from tarball
+
 1.3.7 (2023-06-21)
 ------------------
 

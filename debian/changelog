@@ -1,3 +1,37 @@
+mmdebstrap (1.4.0-1) unstable; urgency=medium
+
+  * New upstream version 1.4.0
+  * drop ./debian/patches
+  * debian/tests/control: add debianutils and usrmerge
+  * debian/rules: install mmdebstrap-autopkgtest-build-qemu
+  * debian/rules: generate man page for mmdebstrap-autopkgtest-build-qemu
+  * debian/tests/copy_host_apt_config: mkdir -p the dirname
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 24 Oct 2023 07:59:16 +0200
+
+mmdebstrap (1.3.8-3) unstable; urgency=medium
+
+  * set RUN_MA_SAME_TESTS=no for the second test run
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 23 Aug 2023 09:25:52 +0200
+
+mmdebstrap (1.3.8-2) unstable; urgency=medium
+
+  * make_mirror.sh: force update to avoid usage of curl
+  * debootstrap 1.0.128+nmu3 fixed #1031222
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 21 Aug 2023 20:19:31 +0200
+
+mmdebstrap (1.3.8-1) unstable; urgency=medium
+
+  * debian/tests/control: drop curl, dash and doc-debian as direct test
+    dependencies
+  * add patch to also allow wget in addition to curl
+  * debian/tests/control: improve formatting of manual test comment
+  * New upstream version 1.3.8
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 20 Aug 2023 14:05:04 +0200
+
 mmdebstrap (1.3.7-2) unstable; urgency=medium
 
   * debian/tests/control: remove copy-host-apt-config test

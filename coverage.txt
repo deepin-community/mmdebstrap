@@ -277,12 +277,14 @@ Variants: - standard
 Skip-If:
  variant == "-" and hostarch not in ["armel", "armhf", "mipsel"] # #1031276
  variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+ variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
 
 Test: debug
 Variants: - standard
 Skip-If:
  variant == "-" and hostarch not in ["armel", "armhf", "mipsel"] # #1031276
  variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+ variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
 
 Test: quiet
 Needs-Root: true
@@ -420,3 +422,12 @@ Skip-If: hostarch in ["i386", "armel", "armhf", "mipsel"] # #1023286
 
 Test: auto-mode-as-normal-user
 Modes: auto
+
+Test: skip-output-dev
+Modes: root unshare
+
+Test: skip-output-mknod
+Modes: root unshare
+
+Test: skip-tar-in-mknod
+Modes: unshare
