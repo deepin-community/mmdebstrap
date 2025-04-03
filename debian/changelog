@@ -1,3 +1,9 @@
+mmdebstrap (1.4.0-1deepin1) unstable; urgency=medium
+
+  * add loong64 support
+
+ -- bluesky <chenchongbiao@deepin.org>  Thu, 03 Apr 2025 13:17:22 +0800
+
 mmdebstrap (1.4.0-1) unstable; urgency=medium
 
   * New upstream version 1.4.0
