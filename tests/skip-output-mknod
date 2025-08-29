@@ -4,27 +4,27 @@ export LC_ALL=C.UTF-8
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
 # test this for both unshare and root mode because the code paths creating
 # entries in /dev are different depending on whether mknod is available or not
 $prefix {{ CMD }} --mode={{ MODE }} --variant=apt --skip=output/mknod \
-	{{ DIST }} - {{ MIRROR }} | {
-	tar -t;
-	echo ./dev/console;
-	echo ./dev/full;
-	echo ./dev/null;
-	echo ./dev/ptmx;
-	echo ./dev/random;
-	echo ./dev/tty;
-	echo ./dev/urandom;
-	echo ./dev/zero;
+  {{ DIST }} - {{ MIRROR }} | {
+  tar -t
+  echo ./dev/console
+  echo ./dev/full
+  echo ./dev/null
+  echo ./dev/ptmx
+  echo ./dev/random
+  echo ./dev/tty
+  echo ./dev/urandom
+  echo ./dev/zero
 } | sort | diff -u tar1.txt -

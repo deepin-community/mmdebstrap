@@ -3,8 +3,8 @@ set -eu
 export LC_ALL=C.UTF-8
 trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
 {{ CMD }} --mode={{ MODE }} --variant=apt \
-	--skip=chroot/start-stop-daemon,chroot/policy-rc.d \
-	--customize-hook='test ! -e "$1/sbin/start-stop-daemon.REAL"' \
-	--customize-hook='test ! -e "$1/usr/sbin/policy-rc.d"' \
-	{{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+  --skip=chroot/start-stop-daemon,chroot/policy-rc.d \
+  --customize-hook='test ! -e "$1/sbin/start-stop-daemon.REAL"' \
+  --customize-hook='test ! -e "$1/usr/sbin/policy-rc.d"' \
+  {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

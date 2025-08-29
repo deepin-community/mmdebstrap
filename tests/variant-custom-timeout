@@ -7,5 +7,5 @@ export LC_ALL=C.UTF-8
 # https://bugs.debian.org/1017795
 ret=0
 {{ CMD }} --mode={{ MODE }} --variant=custom \
-	--include=this-package-does-not-exist {{ DIST }} /dev/null {{ MIRROR }} || ret=1
+  --include=this-package-does-not-exist {{ DIST }} /dev/null {{ MIRROR }} || ret=1
 [ $ret -eq 1 ]

@@ -8,28 +8,34 @@ trap "rm -f /tmp/chrootless.tar /tmp/root.tar" EXIT INT TERM
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
-# we need --hook-dir=./hooks/merged-usr because usrmerge does not understand
-# DPKG_ROOT
+MMTARFILTER=
+[ -x /usr/bin/mmtarfilter ] && MMTARFILTER=/usr/bin/mmtarfilter
+[ -x ./tarfilter ] && MMTARFILTER=./tarfilter
+
 # permissions drwxr-sr-x and extended attributes of ./var/log/journal/ cannot
 # be preserved under fakeroot
+# this applies to 'z' lines in files in /usr/lib/tmpfiles.d/
 for INCLUDE in '' 'apt' 'apt,build-essential' 'systemd-sysv'; do
-	{{ CMD }} --variant={{ VARIANT }} --hook-dir=./hooks/merged-usr \
-		--customize-hook='if [ -d "$1"/var/log/journal ]; then rmdir "$1"/var/log/journal; mkdir --mode=2755 "$1"/var/log/journal; chroot "$1" chown root:systemd-journal /var/log/journal; fi' \
-		${INCLUDE:+--include="$INCLUDE"} \
-		{{ DIST }} /tmp/root.tar {{ MIRROR }}
-	$prefix fakeroot {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} --hook-dir=./hooks/merged-usr \
-		${INCLUDE:+--include="$INCLUDE"} \
-		{{ DIST }} /tmp/chrootless.tar {{ MIRROR }}
-	cmp /tmp/root.tar /tmp/chrootless.tar || diffoscope /tmp/root.tar /tmp/chrootless.tar
-	rm /tmp/chrootless.tar /tmp/root.tar
+  {{ CMD }} --variant={{ VARIANT }} \
+    ${INCLUDE:+--include="$INCLUDE"} \
+    {{ DIST }} - {{ MIRROR }} \
+    | "$MMTARFILTER" --path-exclude="/var/log/journal" --path-exclude="/etc/credstore*" \
+      >/tmp/root.tar
+  $prefix fakeroot {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} \
+    ${INCLUDE:+--include="$INCLUDE"} \
+    {{ DIST }} - {{ MIRROR }} \
+    | "$MMTARFILTER" --path-exclude="/var/log/journal" --path-exclude="/etc/credstore*" \
+      >/tmp/chrootless.tar
+  cmp /tmp/root.tar /tmp/chrootless.tar || diffoscope /tmp/root.tar /tmp/chrootless.tar
+  rm /tmp/chrootless.tar /tmp/root.tar
 done

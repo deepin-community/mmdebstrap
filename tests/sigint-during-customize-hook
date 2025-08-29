@@ -6,17 +6,17 @@ pid=$!
 while sleep 1; do [ -e hookstarted ] && break; done
 rm hookstarted
 # negative PID values choose the whole process group
-pgid=$((-1*$(ps -p "$pid" -o pgid=)))
+pgid=$((-1 * $(ps -p "$pid" -o pgid=)))
 /bin/kill --signal INT -- "$pgid"
 ret=0
 wait $pid || ret=$?
 rm -r /tmp/debian-chroot
 if [ -e fail ]; then
-	echo customize hook was not interrupted >&2
-	rm fail
-	exit 1
+  echo customize hook was not interrupted >&2
+  rm fail
+  exit 1
 fi
 if [ "$ret" = 0 ]; then
-	echo expected failure but got exit $ret >&2
-	exit 1
+  echo expected failure but got exit $ret >&2
+  exit 1
 fi

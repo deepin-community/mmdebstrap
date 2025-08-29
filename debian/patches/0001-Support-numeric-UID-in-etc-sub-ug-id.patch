@@ -1,0 +1,97 @@
+From 6f0a2fcd7f0b21a69d6c2b7c90272a132ed58ff5 Mon Sep 17 00:00:00 2001
+From: Jochen Sprickerhof <git@jochen.sprickerhof.de>
+Date: Sun, 10 Aug 2025 18:06:47 +0200
+Subject: [PATCH] Support numeric UID in /etc/sub[ug]id
+
+Numeric user ids are supported in /etc/sub[ug]id since shadow 4.3.0, see
+https://github.com/shadow-maint/shadow/commit/a113b87c4 so since before
+Debian Bullseye.
+
+sbuild added support for them in 8779a02190 see also
+https://salsa.debian.org/debian/sbuild/-/merge_requests/197
+https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1110876
+
+This was because porterboxes were configured with numeric uids, see
+https://rt.debian.org/Ticket/Display.html?id=9664
+---
+ coverage.txt          |  3 +++
+ mmdebstrap            |  8 ++++----
+ tests/numeric-uid-gid | 17 +++++++++++++++++
+ 3 files changed, 24 insertions(+), 4 deletions(-)
+ create mode 100644 tests/numeric-uid-gid
+
+diff --git a/coverage.txt b/coverage.txt
+index be105dd..4539dd4 100644
+--- a/coverage.txt
++++ b/coverage.txt
+@@ -436,3 +436,6 @@ Modes: unshare
+ 
+ Test: empty-suite
+ Needs-APT-Config: true
++
++Test: numeric-uid-gid
++Needs-QEMU: true
+diff --git a/mmdebstrap b/mmdebstrap
+index 075582e..6ac88aa 100755
+--- a/mmdebstrap
++++ b/mmdebstrap
+@@ -1455,14 +1455,14 @@ sub read_subuid_subgid {
+     }
+     while (my $line = <$fh>) {
+         ($n, $subid, $num_subid) = split(/:/, $line, 3);
+-        last if ($n eq $username);
++        last if ($n eq $username || $n eq $REAL_USER_ID);
+     }
+     close $fh;
+     if (!length $subid) {
+         maybe_warn("/etc/subuid is empty");
+         return;
+     }
+-    if ($n ne $username) {
++    if ($n ne $username && $n ne $REAL_USER_ID) {
+         maybe_warn("no entry in /etc/subuid for $username");
+         return;
+     }
+@@ -1493,14 +1493,14 @@ sub read_subuid_subgid {
+     }
+     while (my $line = <$fh>) {
+         ($n, $subid, $num_subid) = split(/:/, $line, 3);
+-        last if ($n eq $username);
++        last if ($n eq $username || $n eq $REAL_USER_ID);
+     }
+     close $fh;
+     if (!length $subid) {
+         maybe_warn("/etc/subgid is empty");
+         return;
+     }
+-    if ($n ne $username) {
++    if ($n ne $username && $n ne $REAL_USER_ID) {
+         maybe_warn("no entry in /etc/subgid for $username");
+         return;
+     }
+diff --git a/tests/numeric-uid-gid b/tests/numeric-uid-gid
+new file mode 100644
+index 0000000..2438f15
+--- /dev/null
++++ b/tests/numeric-uid-gid
+@@ -0,0 +1,17 @@
++#!/bin/sh
++set -eu
++export LC_ALL=C.UTF-8
++export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
++
++trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
++
++if [ ! -e /mmdebstrap-testenv ]; then
++  echo "this test modifies the system and should only be run inside a container" >&2
++  exit 1
++fi
++# create a new user with known uid
++useradd --home-dir /home/user --create-home --uid 1000 user
++# create a subuid file with a numeric entry instead of using the username
++echo 1000:100000:65536 >/etc/subuid
++runuser -u user -- {{ CMD }} --mode=unshare --variant=apt {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
++cmp ./cache/mmdebstrap-{{ DIST }}-apt.tar /tmp/debian-chroot.tar
+-- 
+2.39.5
+

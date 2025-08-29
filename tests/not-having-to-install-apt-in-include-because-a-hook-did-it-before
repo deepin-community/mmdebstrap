@@ -3,7 +3,7 @@ set -eu
 export LC_ALL=C.UTF-8
 trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
 {{ CMD }} --mode={{ MODE }} --variant=essential --include=apt \
-	--essential-hook='APT_CONFIG=$MMDEBSTRAP_APT_CONFIG apt-get update' \
-	--essential-hook='APT_CONFIG=$MMDEBSTRAP_APT_CONFIG apt-get --yes install -oDPkg::Chroot-Directory="$1" apt' \
-	{{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
-tar -tf /tmp/debian-chroot.tar | sort | grep -v ./var/lib/apt/extended_states | diff -u tar1.txt -
+  --essential-hook='APT_CONFIG=$MMDEBSTRAP_APT_CONFIG apt-get update' \
+  --essential-hook='APT_CONFIG=$MMDEBSTRAP_APT_CONFIG apt-get --yes install apt' \
+  {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

@@ -4,9 +4,9 @@ export LC_ALL=C.UTF-8
 [ "{{ MODE }}" = "unshare" ]
 trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
 {{ CMD }} --mode=unshare --variant=apt \
-	--skip=chroot/mount/proc,chroot/mount/sys \
-	--customize-hook='mountpoint "$1"/dev/null' \
-	--customize-hook='if mountpoint "$1"/sys; then exit 1; fi' \
-	--customize-hook='if mountpoint "$1"/proc; then exit 1; fi' \
-	{{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+  --skip=chroot/mount/proc,chroot/mount/sys \
+  --customize-hook='mountpoint "$1"/dev/null' \
+  --customize-hook='if mountpoint "$1"/sys; then exit 1; fi' \
+  --customize-hook='if mountpoint "$1"/proc; then exit 1; fi' \
+  {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

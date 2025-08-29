@@ -6,7 +6,7 @@ trap "rm -rf /tmp/debian-chroot.tar" EXIT INT TERM
 {{ CMD }} --mode={{ MODE }} --variant=apt --format=directory {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 ftype=$(stat -c %F /tmp/debian-chroot.tar)
 if [ "$ftype" != directory ]; then
-	echo "expected directory but got: $ftype" >&2
-	exit 1
+  echo "expected directory but got: $ftype" >&2
+  exit 1
 fi
 tar -C /tmp/debian-chroot.tar --one-file-system -c . | tar -t | sort | diff -u tar1.txt -

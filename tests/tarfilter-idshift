@@ -1,58 +1,111 @@
 #!/bin/sh
 set -eu
 export LC_ALL=C.UTF-8
-if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test modifies the system and should only be run inside a container" >&2
-	exit 1
-fi
-trap "rm -f /tmp/debian-chroot.tar /tmp/debian-chroot-shifted.tar /tmp/debian-chroot.txt /tmp/debian-chroot-shiftedback.tar /tmp/expected; rm -rf /tmp/debian-chroot" EXIT INT TERM
-useradd --home-dir /home/user --create-home user
-echo user:100000:65536 | cmp /etc/subuid -
-echo user:100000:65536 | cmp /etc/subgid -
-# include iputils-ping so that we can verify that tarfilter does not remove
-# extended attributes
-# run through tarshift no-op to create a tarball that should be bit-by-bit
-# identical to a round trip through "tarfilter --idshift X" and "tarfilter --idshift -X"
-runuser -u user -- {{ CMD }} --mode=unshare --variant=apt --include=iputils-ping {{ DIST }} - {{ MIRROR }} \
-	| ./tarfilter --idshift 0 > /tmp/debian-chroot.tar
+
+trap "rm -f /tmp/mkpaxtar.pl /tmp/orig.tar /tmp/file /tmp/expected /tmp/filtered.tar" EXIT INT TERM
+
+cat <<'END' >/tmp/mkpaxtar.pl
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+my @entries = (
+    # filename            mode      type content
+    ['./PaxHeaders/file', oct(644), 'x', "57 SCHILY.xattr.security.capability=\x01\0\0\x02\0\x20\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x0a"],
+    ['./file',              oct(644), 0,   'test'],
+);
+
+my $num_entries = 0;
+
+foreach my $file (@entries) {
+    my ($fname, $mode, $type, $content) = @{$file};
+    my $entry = pack(
+        'a100 a8 a8 a8 a12 a12 A8 a1 a100 a6 a2 a32 a32 a8 a8 a155 x12',
+        $fname,
+        sprintf('%07o',  $mode),
+        sprintf('%07o',  0),                  # uid
+        sprintf('%07o',  0),                  # gid
+        sprintf('%011o', length $content),    # size
+        sprintf('%011o', 0),                  # mtime
+        '',                                   # checksum
+        $type,
+        '',                                   # linkname
+        "ustar",                              # magic
+        "00",                                 # version
+        '',                                   # username
+        '',                                   # groupname
+        '',                                   # dev major
+        '',                                   # dev minor
+        '',                                   # prefix
+    );
+
+    # compute and insert checksum
+    substr($entry, 148, 7)
+      = sprintf("%06o\0", unpack("%16C*", $entry));
+    print $entry;
+    $num_entries += 1;
+
+    if (length $content) {
+        print(pack 'a512', $content);
+        $num_entries += 1;
+    }
+}
+
+# https://www.gnu.org/software/tar/manual/html_node/Standard.html
+#
+# Physically, an archive consists of a series of file entries terminated by an
+# end-of-archive entry, which consists of two 512 blocks of zero bytes. At the
+# end of the archive file there are two 512-byte blocks filled with binary
+# zeros as an end-of-file marker.
+
+print(pack 'a512', '');
+print(pack 'a512', '');
+$num_entries += 2;
+
+# https://www.gnu.org/software/tar/manual/html_section/tar_76.html
+#
+# Some devices requires that all write operations be a multiple of a certain
+# size, and so, tar pads the archive out to the next record boundary.
+#
+# The default blocking factor is 20. With a block size of 512 bytes, we get a
+# record size of 10240.
+
+for (my $i = $num_entries ; $i < 20 ; $i++) {
+    print(pack 'a512', '');
+}
+END
+
+MMTARFILTER=
+[ -x /usr/bin/mmtarfilter ] && MMTARFILTER=/usr/bin/mmtarfilter
+[ -x ./tarfilter ] && MMTARFILTER=./tarfilter
+
+perl /tmp/mkpaxtar.pl | "$MMTARFILTER" >/tmp/orig.tar
 # make sure that xattrs are set in the original tarball
-mkdir /tmp/debian-chroot
-tar --xattrs --xattrs-include='*' --directory /tmp/debian-chroot -xf /tmp/debian-chroot.tar ./usr/bin/ping
-echo "/tmp/debian-chroot/usr/bin/ping cap_net_raw=ep" > /tmp/expected
-getcap /tmp/debian-chroot/usr/bin/ping | diff -u /tmp/expected - >&2
-rm /tmp/debian-chroot/usr/bin/ping
-rmdir /tmp/debian-chroot/usr/bin
-rmdir /tmp/debian-chroot/usr
-rmdir /tmp/debian-chroot
-# shift the uid/gid forward by 100000 and backward by 100000
-./tarfilter --idshift 100000 < /tmp/debian-chroot.tar > /tmp/debian-chroot-shifted.tar
-./tarfilter --idshift -100000 < /tmp/debian-chroot-shifted.tar > /tmp/debian-chroot-shiftedback.tar
-# the tarball before and after the roundtrip through tarfilter should be bit
-# by bit identical
-cmp /tmp/debian-chroot.tar /tmp/debian-chroot-shiftedback.tar
-# manually adjust uid/gid and compare "tar -t" output
-tar --numeric-owner -tvf /tmp/debian-chroot.tar \
-	| sed 's# 42/0 # 100042/100000 #' \
-	| sed 's# 0/0 # 100000/100000 #' \
-	| sed 's# 0/5 # 100000/100005 #' \
-	| sed 's# 0/8 # 100000/100008 #' \
-	| sed 's# 0/42 # 100000/100042 #' \
-	| sed 's# 0/43 # 100000/100043 #' \
-	| sed 's# 0/50 # 100000/100050 #' \
-	| sed 's/ \+/ /g' \
-	> /tmp/debian-chroot.txt
-tar --numeric-owner -tvf /tmp/debian-chroot-shifted.tar \
-	| sed 's/ \+/ /g' \
-	| diff -u /tmp/debian-chroot.txt - >&2
-mkdir /tmp/debian-chroot
-tar --xattrs --xattrs-include='*' --directory /tmp/debian-chroot -xf /tmp/debian-chroot-shifted.tar
-echo "100000 100000" > /tmp/expected
-stat --format="%u %g" /tmp/debian-chroot/usr/bin/ping | diff -u /tmp/expected - >&2
-echo "/tmp/debian-chroot/usr/bin/ping cap_net_raw=ep" > /tmp/expected
-getcap /tmp/debian-chroot/usr/bin/ping | diff -u /tmp/expected - >&2
-echo "0 0" > /tmp/expected
-runuser -u user -- {{ CMD }} --unshare-helper /usr/sbin/chroot /tmp/debian-chroot stat --format="%u %g" /usr/bin/ping \
-	| diff -u /tmp/expected - >&2
-echo "/usr/bin/ping cap_net_raw=ep" > /tmp/expected
-runuser -u user -- {{ CMD }} --unshare-helper /usr/sbin/chroot /tmp/debian-chroot getcap /usr/bin/ping \
-	| diff -u /tmp/expected - >&2
+tar --xattrs --xattrs-include='*' --directory /tmp/ -xf /tmp/orig.tar ./file
+echo "/tmp/file cap_net_raw=ep" >/tmp/expected
+getcap /tmp/file | diff -u /tmp/expected - >&2
+# make sure that the file content is as expected
+printf test | diff -u /tmp/file - >&2
+# make sure that uid/gid are as expected in the original tarball
+echo "0 0 644" >/tmp/expected
+stat --format="%u %g %a" /tmp/file | diff -u /tmp/expected - >&2
+rm /tmp/file
+# tarball must be bit by-bit-identical after round-trip
+"$MMTARFILTER" --idshift 0 </tmp/orig.tar >/tmp/filtered.tar
+cmp /tmp/orig.tar /tmp/filtered.tar
+
+# now shift uid/gid
+"$MMTARFILTER" --idshift 100000 </tmp/orig.tar >/tmp/filtered.tar
+# make sure that uid/gid are as expected in the filtered tarball
+tar --xattrs --xattrs-include='*' --directory /tmp/ -xf /tmp/filtered.tar ./file
+echo "100000 100000 644" >/tmp/expected
+stat --format="%u %g %a" /tmp/file | diff -u /tmp/expected - >&2
+rm /tmp/file
+
+# now shift uid/gid back to create a round-trip
+"$MMTARFILTER" --idshift -100000 </tmp/filtered.tar >/tmp/filtered2.tar
+
+# the result must be identical to the original and will thus also include the
+# correct xattr information
+cmp /tmp/orig.tar /tmp/filtered2.tar

@@ -8,14 +8,14 @@ rm -r /tmp/debian-chroot/usr/share/doc/debian
 rm -r /tmp/debian-chroot/usr/share/doc/doc-debian
 rm /tmp/debian-chroot/usr/share/lintian/overrides/tzdata
 rm /tmp/debian-chroot/etc/localtime
-rm /tmp/debian-chroot/etc/timezone
+# tzdata 2024b-5 does not create /etc/timezone anymore #822733
+case {{ DIST }} in oldstable | stable) rm /tmp/debian-chroot/etc/timezone ;; esac
 rm -r /tmp/debian-chroot/usr/share/doc/tzdata
 rm -r /tmp/debian-chroot/usr/share/zoneinfo
-rm /tmp/debian-chroot/var/lib/apt/extended_states
 for p in doc-debian tzdata; do
-	for f in list md5sums config postinst postrm templates preinst prerm; do
-		[ -e "/tmp/debian-chroot/var/lib/dpkg/info/$p.$f" ] || continue
-		rm "/tmp/debian-chroot/var/lib/dpkg/info/$p.$f"
-	done
+  for f in list md5sums config postinst postrm templates preinst prerm; do
+    [ -e "/tmp/debian-chroot/var/lib/dpkg/info/$p.$f" ] || continue
+    rm "/tmp/debian-chroot/var/lib/dpkg/info/$p.$f"
+  done
 done
 tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort | diff -u tar1.txt -

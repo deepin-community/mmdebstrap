@@ -9,28 +9,33 @@ pkgs=base-files,base-passwd,busybox,debianutils,dpkg,libc-bin,mawk,tar
 # existing files untouched. It has to run after extraction (otherwise there is
 # no busybox binary) and before first configuration
 {{ CMD }} --mode=root --variant=custom \
-    --include=$pkgs \
-    --setup-hook='mkdir -p "$1/bin"' \
-    --setup-hook='echo root:x:0:0:root:/root:/bin/sh > "$1/etc/passwd"' \
-    --setup-hook='printf "root:x:0:\nmail:x:8:\nutmp:x:43:\n" > "$1/etc/group"' \
-    --extract-hook='chroot "$1" busybox --install -s' \
-    {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
-echo "$pkgs" | tr ',' '\n' > /tmp/expected
+  --include=$pkgs \
+  --setup-hook='mkdir -p "$1/bin"' \
+  --setup-hook='echo root:x:0:0:root:/root:/bin/sh > "$1/etc/passwd"' \
+  --setup-hook='printf "root:x:0:\nmail:x:8:\nutmp:x:43:\n" > "$1/etc/group"' \
+  --extract-hook='chroot "$1" busybox --install -s' \
+  {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+echo "$pkgs" | tr ',' '\n' >/tmp/expected
 chroot /tmp/debian-chroot dpkg-query -f '${binary:Package}\n' -W \
-	| comm -12 - /tmp/expected \
-	| diff -u - /tmp/expected
+  | comm -12 - /tmp/expected \
+  | diff -u - /tmp/expected
 rm /tmp/expected
 for cmd in echo cat sed grep; do
-	test -L /tmp/debian-chroot/bin/$cmd
-	test "$(readlink /tmp/debian-chroot/bin/$cmd)" = "/bin/busybox"
+  test -L /tmp/debian-chroot/bin/$cmd
+  test "$(readlink /tmp/debian-chroot/bin/$cmd)" = "/usr/bin/busybox"
 done
 for cmd in sort tee; do
-	test -L /tmp/debian-chroot/usr/bin/$cmd
-	test "$(readlink /tmp/debian-chroot/usr/bin/$cmd)" = "/bin/busybox"
+  test -L /tmp/debian-chroot/usr/bin/$cmd
+  test "$(readlink /tmp/debian-chroot/usr/bin/$cmd)" = "/usr/bin/busybox"
 done
+
+# if /bin or /sbin are not symlinks, add /bin and /sbin to PATH
+if [ ! -L /tmp/debian-chroot/bin ] || [ ! -L /tmp/debian-chroot/sbin ]; then
+  export PATH="$PATH:/sbin:/bin"
+fi
 chroot /tmp/debian-chroot echo foobar \
-	| chroot /tmp/debian-chroot cat \
-	| chroot /tmp/debian-chroot sort \
-	| chroot /tmp/debian-chroot tee /dev/null \
-	| chroot /tmp/debian-chroot sed 's/foobar/blubber/' \
-	| chroot /tmp/debian-chroot grep blubber >/dev/null
+  | chroot /tmp/debian-chroot cat \
+  | chroot /tmp/debian-chroot sort \
+  | chroot /tmp/debian-chroot tee /dev/null \
+  | chroot /tmp/debian-chroot sed 's/foobar/blubber/' \
+  | chroot /tmp/debian-chroot grep blubber >/dev/null

@@ -5,5 +5,5 @@ export LC_ALL=C.UTF-8
 trap "rm -rf /tmp/debian-chroot" EXIT INT TERM
 
 {{ CMD }} --mode=root --variant=apt {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
-chroot /tmp/debian-chroot dpkg-query --showformat '${binary:Package}\n' --show > pkglist.txt
-tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort > tar1.txt
+chroot /tmp/debian-chroot dpkg-query --showformat '${binary:Package}\n' --show >pkglist.txt
+tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort >tar1.txt

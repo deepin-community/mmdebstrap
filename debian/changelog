@@ -1,8 +1,207 @@
-mmdebstrap (1.4.0-1deepin1) unstable; urgency=medium
+mmdebstrap (1.5.7-3) unstable; urgency=medium
 
-  * add loong64 support
+  * add test for numeric UID in /etc/sub[ug]id
 
- -- bluesky <chenchongbiao@deepin.org>  Thu, 03 Apr 2025 13:17:22 +0800
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 13 Aug 2025 18:37:42 +0200
+
+mmdebstrap (1.5.7-2) unstable; urgency=medium
+
+  * Support numeric UID in /etc/sub[ug]id
+
+ -- Jochen Sprickerhof <jspricke@debian.org>  Wed, 13 Aug 2025 10:58:59 +0200
+
+mmdebstrap (1.5.7-1) unstable; urgency=medium
+
+  * New upstream version 1.5.7
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 08 Apr 2025 18:56:40 +0200
+
+mmdebstrap (1.5.6-5) unstable; urgency=medium
+
+  * debian/control: bump Standards-Version (no changes)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 01 Apr 2025 09:07:59 +0200
+
+mmdebstrap (1.5.6-4) unstable; urgency=medium
+
+  * cherry-pick gpgvnoexpkeysig gpgv check from upstream
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 09 Mar 2025 10:51:58 +0100
+
+mmdebstrap (1.5.6-3) unstable; urgency=medium
+
+  * debian/patches: pick top 3 upstream git commits
+     - fix printf invocation (closes: #1095556)
+  * run with http_proxy empty to allow running with auto-apt-proxy
+  * debian/tests/control: wrap-and-sort -ast
+  * debian/tests/control: add e2fsprogs to Depends
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 25 Feb 2025 22:08:11 +0100
+
+mmdebstrap (1.5.6-2) unstable; urgency=medium
+
+  * debian/tests/control: add Depends tzdata (>= 2024b-5)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 12 Jan 2025 00:54:33 +0100
+
+mmdebstrap (1.5.6-1) unstable; urgency=medium
+
+  * New upstream version 1.5.6
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 11 Jan 2025 13:42:29 +0100
+
+mmdebstrap (1.5.5-1) unstable; urgency=medium
+
+  * New upstream version 1.5.5
+  * debian/control: demote fakeroot and fakechroot to Suggests
+  * debian/tests/control: add two more items that make the autopkgtest fail
+  * run gpg with --check-trustdb making it compatible with gpg-from-sq
+    (closes: #1077600)
+  * do not run dpkg-preconfigure via DPkg::Pre-Install-Pkgs hook (Closes:
+    #1091442)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 10 Jan 2025 00:40:43 +0100
+
+mmdebstrap (1.5.4-2) unstable; urgency=medium
+
+  * debian/tests/control: add shfmt to Depends
+  * tests/empty-suite needs to have Needs-APT-Config: true
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 28 Oct 2024 13:20:15 +0100
+
+mmdebstrap (1.5.4-1) unstable; urgency=medium
+
+  * New upstream version 1.5.4
+  * debian/watch: adjust for upstream change from gitea to forgejo
+  * debian/tests/control: require iputils-ping (>= 3:20240905-1) due to dropped
+    xattrs
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 28 Oct 2024 09:47:23 +0100
+
+mmdebstrap (1.5.3-1) unstable; urgency=medium
+
+  * New upstream version 1.5.3
+  * debian/control: add comment that dpkg-dev is also needed for
+    mmdebstrap-autopkgtest-build-qemu
+  * m-a-b-q: replace test_installed by dpkg-checkbuilddeps (Closes:
+    #1076476)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Fri, 13 Sep 2024 09:54:12 +0200
+
+mmdebstrap (1.5.2-1) unstable; urgency=medium
+
+  * New upstream version 1.5.2
+  * drop patches
+  * mmdebstrap-autopkgtest-build-qemu: fix kernel selection (closes: #1073543)
+  * do not require /var/log/faillog to exist (closes: #1074082)
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 26 Jun 2024 14:33:50 +0200
+
+mmdebstrap (1.5.1-4) unstable; urgency=medium
+
+  * add patch to find out cause of debootstrap failure on s390x
+  * debian/control: add Suggests on e2fsprogs and libarchive13 for ext4 format
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 12 Jun 2024 14:46:30 +0200
+
+mmdebstrap (1.5.1-3) unstable; urgency=medium
+
+  * cherry-pick patch from upstream fixing tests/empty-sources.list (closes:
+    #1072986)
+  * debian/tests/control: add missing triggers on last essential packages
+    involved in the /usr-move: util-linux, base-files
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 11 Jun 2024 13:52:17 +0200
+
+mmdebstrap (1.5.1-2) unstable; urgency=medium
+
+  * tests: base-files now ships merged-/usr symlinks
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 10 Jun 2024 07:58:30 +0200
+
+mmdebstrap (1.5.1-1) unstable; urgency=medium
+
+  * New upstream version 1.5.1
+  * drop patches
+  * debian/control: add decompressors to suggests
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 03 Jun 2024 13:20:01 +0200
+
+mmdebstrap (1.5.0-2) unstable; urgency=medium
+
+  * add debian/patches/installed_size.patch
+  * debian/tests/control: add uuid-runtime to Depends
+  * revert auditd for skip-tar-in-mknod
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 15 May 2024 07:04:26 +0200
+
+mmdebstrap (1.5.0-1) unstable; urgency=medium
+
+  * New upstream version 1.5.0
+     - add --format=ext4
+  * debian/mmdebstrap.tmpfiles: prevent files in the chroot with a too old
+    mtime from being cleaned up
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 14 May 2024 08:06:25 +0200
+
+mmdebstrap (1.4.3-6) unstable; urgency=medium
+
+  * fixup maybe-merged-usr patch
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 27 Feb 2024 00:34:12 +0100
+
+mmdebstrap (1.4.3-5) unstable; urgency=medium
+
+  * cherry-pick patch from upstream fixing maybe-merged-usr for the time when
+    usr-is-merged becomes a virtual package
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 26 Feb 2024 14:57:26 +0100
+
+mmdebstrap (1.4.3-4) unstable; urgency=medium
+
+  * debian/tests/sourcesfilter: append instead of replacing
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Tue, 20 Feb 2024 13:18:32 +0100
+
+mmdebstrap (1.4.3-3) unstable; urgency=medium
+
+  * debian/tests: replace copy_host_apt_config with python-apt script
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sun, 18 Feb 2024 12:06:59 +0100
+
+mmdebstrap (1.4.3-2) unstable; urgency=medium
+
+  * debian/tests/copy_host_apt_config: anticipate components being configured
+    multiple times
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Sat, 17 Feb 2024 08:11:49 +0100
+
+mmdebstrap (1.4.3-1) unstable; urgency=medium
+
+  * New upstream version 1.4.3
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Thu, 01 Feb 2024 08:29:34 +0100
+
+mmdebstrap (1.4.2-1) unstable; urgency=medium
+
+  * New upstream version 1.4.2
+     - mmdebstrap-autopkgtest-build-qemu: fix octal mode computation (closes:
+       #1061634)
+     - mmdebstrap-autopkgtest-build-qemu: choose 'host' as hostname (closes:
+       #1061636)
+  * debian/tests/control: add dpkg as test trigger because of #1059982
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Mon, 29 Jan 2024 14:28:43 +0100
+
+mmdebstrap (1.4.1-1) unstable; urgency=medium
+
+  * New upstream version 1.4.1
+     - improvements to mmdebstrap-autopkgtest-build-qemu (closes: #1060416)
+  * debian/tests/control: add #1053671
+  * debian/salsa-ci.yml: add explicit 3h timeout for .test-autopkgtest
+  * debian/patches: cherry-pick two patches from upstream
+
+ -- Johannes Schauer Marin Rodrigues <josch@debian.org>  Wed, 24 Jan 2024 02:58:17 +0100
 
 mmdebstrap (1.4.0-1) unstable; urgency=medium
 

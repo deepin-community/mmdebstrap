@@ -7,14 +7,18 @@ export LC_ALL=C.UTF-8
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
-$prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} --include=dpkg,dash,diffutils,coreutils,libc-bin,sed {{ DIST }} /dev/null {{ MIRROR }}
+# do not install base-files, so that /proc, /sys and /dev are missing
+$prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} \
+  --setup-hook='for dir in bin lib lib32 lib64 libo32 libx32 sbin; do ln -s "usr/$dir" "$1/$dir"; done' \
+  --include=dpkg,dash,diffutils,coreutils,libc-bin,sed \
+  {{ DIST }} /dev/null {{ MIRROR }}

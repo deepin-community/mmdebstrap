@@ -59,21 +59,21 @@ Needs-QEMU: true
 Test: mmdebstrap
 Needs-Root: true
 Modes: root
-Formats: tar squashfs ext2
+Formats: tar squashfs ext2 ext4
 Variants: essential apt minbase buildd - standard
 Skip-If:
  variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
  mode == "fakechroot" and variant in ["-", "standard"] # no extended attributes
- variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+ variant == "standard" and dist in ["oldstable", "stable"] and hostarch in ["armel", "armhf", "mipsel"] # #1031276
 
 Test: check-for-bit-by-bit-identical-format-output
 Modes: unshare fakechroot
-Formats: tar squashfs ext2
+Formats: tar squashfs ext2 ext4
 Variants: essential apt minbase buildd - standard
 Skip-If:
  variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
  mode == "fakechroot" and variant in ["-", "standard"] # no extended attributes
- variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
+ variant == "standard" and dist in ["oldstable", "stable"] and hostarch in ["armel", "armhf", "mipsel"] # #1031276
 
 Test: tarfilter-idshift
 Needs-QEMU: true
@@ -194,18 +194,18 @@ Skip-If:
  hostarch != "amd64"
  not run_ma_same_tests
 
-Test: include-libmagic-mgc-arm64
+Test: include-foreign-libmagic-mgc
 Needs-Root: true
 Needs-APT-Config: true
 Skip-If:
- hostarch != "amd64"
+ hostarch not in ["amd64", "arm64"]
  not run_ma_same_tests
 
-Test: include-libmagic-mgc-arm64-with-multiple-arch-options
+Test: include-foreign-libmagic-mgc-with-multiple-arch-options
 Needs-Root: true
 Needs-APT-Config: true
 Skip-If:
- hostarch != "amd64"
+ hostarch not in ["amd64", "arm64"]
  not run_ma_same_tests
 
 Test: aptopt
@@ -273,17 +273,13 @@ Test: debootstrap-no-op-options
 Needs-Root: true
 
 Test: verbose
-Variants: - standard
+Variants: standard
 Skip-If:
- variant == "-" and hostarch not in ["armel", "armhf", "mipsel"] # #1031276
- variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
  variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
 
 Test: debug
-Variants: - standard
+Variants: standard
 Skip-If:
- variant == "-" and hostarch not in ["armel", "armhf", "mipsel"] # #1031276
- variant == "standard" and hostarch in ["armel", "armhf", "mipsel"] # #1031276
  variant == "standard" and dist == "oldstable" # #864082, #1004557, #1004558
 
 Test: quiet
@@ -365,21 +361,22 @@ Variants: custom
 Modes: chrootless
 Needs-APT-Config: true
 
-Test: install-libmagic-mgc-on-arm64
+Test: install-libmagic-mgc-on-foreign
 Variants: custom
 Modes: chrootless
 Skip-If:
- hostarch != "amd64"
+ hostarch not in ["amd64", "arm64"]
  not have_binfmt
 
 Test: install-busybox-based-sub-essential-system
 Needs-Root: true
 
-Test: create-arm64-tarball
+Test: create-foreign-tarball
 Modes: root unshare fakechroot
 Skip-If:
- hostarch != "amd64"
+ hostarch not in ["amd64", "arm64"]
  mode == "fakechroot" and not run_ma_same_tests
+ mode == "fakechroot" and hostarch == "arm64" # usrmerge postinst under fakechroot wants to copy /lib/ld-linux-x86-64.so.2 (which does not exist) instead of /lib64/ld-linux-x86-64.so.2
  not have_binfmt
 
 Test: no-sbin-in-path
@@ -418,7 +415,9 @@ Test: empty-sources.list
 Test: merged-fakechroot-inside-unmerged-chroot
 Needs-Root: true
 Needs-APT-Config: true
-Skip-If: hostarch in ["i386", "armel", "armhf", "mipsel"] # #1023286
+Skip-If:
+ hostarch in ["i386", "armel", "armhf", "mipsel"] # #1023286
+ dist in ["testing", "unstable"]  # #1053671
 
 Test: auto-mode-as-normal-user
 Modes: auto
@@ -431,3 +430,9 @@ Modes: root unshare
 
 Test: skip-tar-in-mknod
 Modes: unshare
+
+Test: zombie-reaping
+Modes: unshare
+
+Test: empty-suite
+Needs-APT-Config: true

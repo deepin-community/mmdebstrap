@@ -2,12 +2,12 @@
 set -eu
 export LC_ALL=C.UTF-8
 if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test modifies the system and should only be run inside a container" >&2
-	exit 1
+  echo "this test modifies the system and should only be run inside a container" >&2
+  exit 1
 fi
 useradd --home-dir /home/user --create-home user
 if [ -e /proc/sys/kernel/unprivileged_userns_clone ] && [ "$(sysctl -n kernel.unprivileged_userns_clone)" = "1" ]; then
-	sysctl -w kernel.unprivileged_userns_clone=0
+  sysctl -w kernel.unprivileged_userns_clone=0
 fi
 runuser -u user -- {{ CMD }} --mode=auto --variant=apt {{ DIST }} /tmp/debian-chroot.tar.gz {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar.gz | sort | diff -u tar1.txt -

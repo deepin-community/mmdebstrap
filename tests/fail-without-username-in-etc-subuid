@@ -2,16 +2,16 @@
 set -eu
 export LC_ALL=C.UTF-8
 if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test modifies the system and should only be run inside a container" >&2
-	exit 1
+  echo "this test modifies the system and should only be run inside a container" >&2
+  exit 1
 fi
 useradd --home-dir /home/user --create-home user
-awk -F: '$1!="user"' /etc/subuid > /etc/subuid.tmp
+awk -F: '$1!="user"' /etc/subuid >/etc/subuid.tmp
 mv /etc/subuid.tmp /etc/subuid
 ret=0
 runuser -u user -- {{ CMD }} --mode=unshare --variant=apt {{ DIST }} /tmp/debian-chroot {{ MIRROR }} || ret=$?
 if [ "$ret" = 0 ]; then
-	echo expected failure but got exit $ret >&2
-	exit 1
+  echo expected failure but got exit $ret >&2
+  exit 1
 fi
 [ ! -e /tmp/debian-chroot ]

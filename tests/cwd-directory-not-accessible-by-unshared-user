@@ -6,11 +6,11 @@ export LC_ALL=C.UTF-8
 [ {{ MODE }} = "unshare" ]
 
 if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-       if [ ! -e /mmdebstrap-testenv ]; then
-               echo "this test modifies the system and should only be run inside a container" >&2
-               exit 1
-       fi
-       useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  if [ ! -e /mmdebstrap-testenv ]; then
+    echo "this test modifies the system and should only be run inside a container" >&2
+    exit 1
+  fi
+  useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
 fi
 prefix="runuser -u ${SUDO_USER:-user} --"
 
@@ -19,11 +19,11 @@ chmod 700 /tmp/debian-chroot
 chown "${SUDO_USER:-user}:${SUDO_USER:-user}" /tmp/debian-chroot
 set -- env --chdir=/tmp/debian-chroot
 if [ "{{ CMD }}" = "./mmdebstrap" ]; then
-	set -- "$@" "$(realpath --canonicalize-existing ./mmdebstrap)"
+  set -- "$@" "$(realpath --canonicalize-existing ./mmdebstrap)"
 elif [ "{{ CMD }}" = "perl -MDevel::Cover=-silent,-nogcov ./mmdebstrap" ]; then
-	set -- "$@" perl -MDevel::Cover=-silent,-nogcov "$(realpath --canonicalize-existing ./mmdebstrap)"
+  set -- "$@" perl -MDevel::Cover=-silent,-nogcov "$(realpath --canonicalize-existing ./mmdebstrap)"
 else
-	set -- "$@" {{ CMD }}
+  set -- "$@" {{ CMD }}
 fi
 $prefix "$@" --mode={{ MODE }} --variant=apt {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

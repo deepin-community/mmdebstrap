@@ -7,6 +7,6 @@ trap 'rm -rf /tmp/quoted\"path' EXIT INT TERM
 ret=0
 {{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} /tmp/quoted\"path {{ MIRROR }} || ret=$?
 if [ "$ret" = 0 ]; then
-	echo expected failure but got exit $ret >&2
-	exit 1
+  echo expected failure but got exit $ret >&2
+  exit 1
 fi

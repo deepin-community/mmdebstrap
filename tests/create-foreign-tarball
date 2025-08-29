@@ -1,0 +1,80 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C.UTF-8
+
+prefix=
+if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
+fi
+
+case "$(dpkg --print-architecture)" in
+  arm64)
+    native_arch=arm64
+    native_gnu=aarch64-linux-gnu
+    foreign_arch=amd64
+    foreign_gnu=x86_64-linux-gnu
+    ;;
+  amd64)
+    native_arch=amd64
+    native_gnu=x86_64-linux-gnu
+    foreign_arch=arm64
+    foreign_gnu=aarch64-linux-gnu
+    ;;
+  *)
+    echo "unsupported native architecture" >&2
+    exit 1
+    ;;
+esac
+
+[ "{{ MODE }}" = "fakechroot" ] && prefix="$prefix fakechroot fakeroot"
+$prefix {{ CMD }} --mode={{ MODE }} --variant=apt --architectures="$foreign_arch" \
+  {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+# we ignore differences between architectures by ignoring some files
+# and renaming others
+{
+  tar -tf /tmp/debian-chroot.tar \
+    | grep -v '^\./usr/bin/i386$' \
+    | grep -v '^\./usr/bin/x86_64$' \
+    | grep -v '^\./lib64$' \
+    | grep -v '^\./usr/lib64/$' \
+    | grep -v '^\./usr/lib64/ld-linux-x86-64\.so\.2$' \
+    | grep -v '^\./usr/lib/ld-linux-aarch64\.so\.1$' \
+    | grep -v "^\\./usr/lib/$foreign_gnu/ld-linux-aarch64\\.so\\.1$" \
+    | grep -v "^\\./usr/lib/$foreign_gnu/ld-linux-x86-64\\.so\\.2$" \
+    | grep -v "^\\./usr/lib/$foreign_gnu/perl/5\\.[0-9][.0-9]\\+/.*\\.ph$" \
+    | grep -v "^\\./usr/lib/$foreign_gnu/libmvec\\.so\\.1$" \
+    | grep -v "^\\./usr/lib/$foreign_gnu/engines-3/padlock\\.so$" \
+    | grep -v "^\\./usr/share/doc/[^/]\\+/changelog\\(\\.Debian\\)\\?\\.$foreign_arch\\.gz$" \
+    | grep -v '^\./usr/share/man/man8/i386\.8\.gz$' \
+    | grep -v '^\./usr/share/man/man8/x86_64\.8\.gz$' \
+    | sed "s/$foreign_gnu/$native_gnu/" \
+    | sed "s/$foreign_arch/$native_arch/"
+} | sort >/tmp/tar2.txt
+{
+  grep <tar1.txt -v '^\./usr/bin/i386$' \
+    | grep -v '^\./usr/bin/x86_64$' \
+    | grep -v '^\./lib32$' \
+    | grep -v '^\./lib64$' \
+    | grep -v '^\./libx32$' \
+    | grep -v '^\./usr/lib32/$' \
+    | grep -v '^\./usr/libx32/$' \
+    | grep -v '^\./usr/lib64/$' \
+    | grep -v '^\./usr/lib64/ld-linux-x86-64\.so\.2$' \
+    | grep -v '^\./usr/lib/ld-linux-aarch64\.so\.1$' \
+    | grep -v "^\\./usr/lib/$native_gnu/ld-linux-x86-64\\.so\\.2$" \
+    | grep -v "^\\./usr/lib/$native_gnu/ld-linux-aarch64\\.so\\.1$" \
+    | grep -v "^\\./usr/lib/$native_gnu/libmvec\\.so\\.1$" \
+    | grep -v "^\\./usr/lib/$native_gnu/perl/5\\.[0-9][.0-9]\\+/.*\\.ph$" \
+    | grep -v "^\\./usr/lib/$native_gnu/engines-3/padlock\\.so$" \
+    | grep -v "^\\./usr/share/doc/[^/]\\+/changelog\\(\\.Debian\\)\\?\\.$native_arch\\.gz$" \
+    | grep -v '^\./usr/share/man/man8/i386\.8\.gz$' \
+    | grep -v '^\./usr/share/man/man8/x86_64\.8\.gz$'
+} | sort | diff -u - /tmp/tar2.txt >&2
+rm /tmp/debian-chroot.tar /tmp/tar2.txt

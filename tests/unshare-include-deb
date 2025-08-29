@@ -9,21 +9,21 @@ trap "rm -rf /tmp/dummypkg.deb /tmp/dummypkg" EXIT INT TERM
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
 # instead of obtaining a .deb from our cache, we create a new package because
 # otherwise apt might decide to download the package with the same name and
 # version from the cache instead of using the local .deb
 mkdir -p /tmp/dummypkg/DEBIAN
-cat << END > "/tmp/dummypkg/DEBIAN/control"
+cat <<END >"/tmp/dummypkg/DEBIAN/control"
 Package: dummypkg
 Priority: optional
 Section: oldlibs
@@ -41,9 +41,9 @@ chmod 600 /tmp/dummypkg.deb
 
 ret=0
 $prefix {{ CMD }} --variant=apt --mode={{ MODE }} --include="/tmp/dummypkg.deb" \
-	{{ DIST }} /dev/null {{ MIRROR }} || ret=$?
+  {{ DIST }} /dev/null {{ MIRROR }} || ret=$?
 
 if [ "$ret" -eq 0 ]; then
-	echo "expected failure but got exit $ret" >&2
-	exit 1
+  echo "expected failure but got exit $ret" >&2
+  exit 1
 fi

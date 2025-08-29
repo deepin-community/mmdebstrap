@@ -15,7 +15,7 @@ env APT_CONFIG="$MMDEBSTRAP_APT_CONFIG" apt-get indextargets --no-release-info -
 	| while read -r path; do
 		mkdir -p "$rootdir/run/mmdebstrap"
 		if [ ! -d "/$path" ]; then
-			echo "/$path is not an existing directory" >&2
+			echo "W: /$path is not an existing directory" >&2
 			continue
 		fi
 		case $MMDEBSTRAP_MODE in

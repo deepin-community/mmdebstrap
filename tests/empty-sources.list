@@ -3,6 +3,6 @@ set -eu
 export LC_ALL=C.UTF-8
 trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
 printf '' | {{ CMD }} --mode={{ MODE }} --variant=apt \
-	--setup-hook='echo "deb {{ MIRROR }} {{ DIST }} main" > "$1"/etc/apt/sources.list' \
-	{{ DIST }} /tmp/debian-chroot.tar -
+  --setup-hook='test -e "$1"/etc/apt/sources.list || echo "deb {{ MIRROR }} {{ DIST }} main" > "$1"/etc/apt/sources.list' \
+  {{ DIST }} /tmp/debian-chroot.tar -
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

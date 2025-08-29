@@ -1,6 +1,6 @@
 Source: mmdebstrap
 Maintainer: Johannes Schauer Marin Rodrigues <josch@debian.org>
-Standards-Version: 4.6.1
+Standards-Version: 4.7.0
 Build-Depends:
  debhelper-compat (= 13),
  help2man,
@@ -22,9 +22,6 @@ Depends:
 Recommends:
 # building chroots for arches that cannot be executed on the current platform
  arch-test,
-# --mode=fakechroot
- fakechroot,
- fakeroot,
 # figure out the right signed-by value for distributions that apt doesn't know
 # the right keyring for
  gpg (>= 2.2.8),
@@ -58,9 +55,16 @@ Suggests:
  distro-info-data,
 # the dpkg-architecture binary to turn a Debian architecture into the
 # DEB_HOST_MULTIARCH value
+# the dpkg-checkbuilddeps binary for mmdebstrap-autopkgtest-build-qemu
  dpkg-dev,
+# --mode=fakechroot
+ fakechroot,
+ fakeroot,
 # --format=ext2
  genext2fs,
+# --format=ext4
+ e2fsprogs,
+ libarchive13,
 # Generation of man page from source code
  perl-doc,
 # for cross platform builds such as building arm64 on amd64
@@ -68,6 +72,13 @@ Suggests:
  qemu-user-static,
 # --format=squashfs
  squashfs-tools-ng,
+# compressors
+ ncompress,
+ bzip2,
+ lzop,
+ lz4,
+ xz-utils,
+ zstd,
 Description: create a Debian chroot
  Downloads, unpacks and installs Debian packages to either directly create a
  directory which can be chrooted into, or a tarball of it. In contrast to

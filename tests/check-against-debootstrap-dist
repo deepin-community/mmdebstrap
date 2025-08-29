@@ -11,9 +11,10 @@ echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
 # https://bugs.debian.org/969631
 # we cannot use useradd because passwd is not Essential:yes
 {{ CMD }} --variant={{ VARIANT }} --mode={{ MODE }} \
-	--essential-hook='[ {{ DIST }} = oldstable ] && [ {{ VARIANT }} = - ] && echo _apt:*:100:65534::/nonexistent:/usr/sbin/nologin >> "$1"/etc/passwd || :' \
-	"$(if [ {{ DIST }} = oldstable ]; then echo --merged-usr; else echo --hook-dir=./hooks/merged-usr; fi)" \
-	{{ DIST }} /tmp/debian-{{ DIST }}-mm.tar {{ MIRROR }}
+  --essential-hook='[ {{ DIST }} = oldstable ] && [ {{ VARIANT }} = - ] && echo _apt:*:100:65534::/nonexistent:/usr/sbin/nologin >> "$1"/etc/passwd || :' \
+  "$(case {{ DIST }} in stable) echo --hook-dir=./hooks/merged-usr ;; *) echo --no-merged-usr ;; esac)" \
+  "$(case {{ DIST }} in oldstable) echo --include=e2fsprogs,mount,tzdata,gcc-9-base ;; stable) echo --include=e2fsprogs,mount,tzdata ;; *) echo --include=base-files ;; esac)" \
+  {{ DIST }} /tmp/debian-{{ DIST }}-mm.tar {{ MIRROR }}
 
 mkdir /tmp/debian-{{ DIST }}-mm
 tar --xattrs --xattrs-include='*' -C /tmp/debian-{{ DIST }}-mm -xf /tmp/debian-{{ DIST }}-mm.tar
@@ -29,27 +30,27 @@ tar -C /tmp/debian-{{ DIST }}-mm -cf /tmp/dev2.tar ./dev
 ret=0
 cmp /tmp/dev1.tar /tmp/dev2.tar >&2 || ret=$?
 if [ "$ret" -ne 0 ]; then
-	if type diffoscope >/dev/null; then
-		diffoscope /tmp/dev1.tar /tmp/dev2.tar
-		exit 1
-	else
-		echo "no diffoscope installed" >&2
-	fi
-	if type base64 >/dev/null; then
-		base64 /tmp/dev1.tar
-		base64 /tmp/dev2.tar
-		exit 1
-	else
-		echo "no base64 installed" >&2
-	fi
-	if type xxd >/dev/null; then
-		xxd /tmp/dev1.tar
-		xxd /tmp/dev2.tar
-		exit 1
-	else
-		echo "no xxd installed" >&2
-	fi
-	exit 1
+  if type diffoscope >/dev/null; then
+    diffoscope /tmp/dev1.tar /tmp/dev2.tar
+    exit 1
+  else
+    echo "no diffoscope installed" >&2
+  fi
+  if type base64 >/dev/null; then
+    base64 /tmp/dev1.tar
+    base64 /tmp/dev2.tar
+    exit 1
+  else
+    echo "no base64 installed" >&2
+  fi
+  if type xxd >/dev/null; then
+    xxd /tmp/dev1.tar
+    xxd /tmp/dev2.tar
+    exit 1
+  else
+    echo "no xxd installed" >&2
+  fi
+  exit 1
 fi
 rm /tmp/dev1.tar /tmp/dev2.tar
 rm -r /tmp/debian-{{ DIST }}-debootstrap/dev /tmp/debian-{{ DIST }}-mm/dev
@@ -60,15 +61,17 @@ rm /tmp/debian-{{ DIST }}-debootstrap/var/cache/apt/archives/*.deb
 rm /tmp/debian-{{ DIST }}-debootstrap/var/cache/ldconfig/aux-cache
 # remove logs
 rm /tmp/debian-{{ DIST }}-debootstrap/var/log/dpkg.log \
-	/tmp/debian-{{ DIST }}-debootstrap/var/log/bootstrap.log \
-	/tmp/debian-{{ DIST }}-debootstrap/var/log/alternatives.log
+  /tmp/debian-{{ DIST }}-debootstrap/var/log/bootstrap.log \
+  /tmp/debian-{{ DIST }}-debootstrap/var/log/alternatives.log
 # remove *-old files
 rm /tmp/debian-{{ DIST }}-debootstrap/var/cache/debconf/config.dat-old \
-	/tmp/debian-{{ DIST }}-mm/var/cache/debconf/config.dat-old
+  /tmp/debian-{{ DIST }}-mm/var/cache/debconf/config.dat-old
 rm /tmp/debian-{{ DIST }}-debootstrap/var/cache/debconf/templates.dat-old \
-	/tmp/debian-{{ DIST }}-mm/var/cache/debconf/templates.dat-old
+  /tmp/debian-{{ DIST }}-mm/var/cache/debconf/templates.dat-old
 rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/status-old \
-	/tmp/debian-{{ DIST }}-mm/var/lib/dpkg/status-old
+  /tmp/debian-{{ DIST }}-mm/var/lib/dpkg/status-old
+rm -f /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/diversions-old \
+  /tmp/debian-{{ DIST }}-mm/var/lib/dpkg/diversions-old
 # remove dpkg files
 rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/available
 rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/cmethopt
@@ -76,50 +79,54 @@ rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/cmethopt
 rm /tmp/debian-{{ DIST }}-mm/var/lib/dpkg/arch
 # since we installed packages directly from the .deb files, Priorities differ
 # thus we first check for equality and then remove the files
-chroot /tmp/debian-{{ DIST }}-debootstrap dpkg --list > /tmp/dpkg1
-chroot /tmp/debian-{{ DIST }}-mm dpkg --list > /tmp/dpkg2
+chroot /tmp/debian-{{ DIST }}-debootstrap dpkg --list >/tmp/dpkg1
+chroot /tmp/debian-{{ DIST }}-mm dpkg --list >/tmp/dpkg2
 diff -u /tmp/dpkg1 /tmp/dpkg2 >&2
 rm /tmp/dpkg1 /tmp/dpkg2
-grep -v '^Priority: ' /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/status > /tmp/status1
-grep -v '^Priority: ' /tmp/debian-{{ DIST }}-mm/var/lib/dpkg/status > /tmp/status2
+grep -v '^Priority: ' /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/status >/tmp/status1
+grep -v '^Priority: ' /tmp/debian-{{ DIST }}-mm/var/lib/dpkg/status >/tmp/status2
 diff -u /tmp/status1 /tmp/status2 >&2
 rm /tmp/status1 /tmp/status2
 rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/dpkg/status /tmp/debian-{{ DIST }}-mm/var/lib/dpkg/status
 # debootstrap exposes the hosts's kernel version
 if [ -e /tmp/debian-{{ DIST }}-debootstrap/etc/apt/apt.conf.d/01autoremove-kernels ]; then
-	rm /tmp/debian-{{ DIST }}-debootstrap/etc/apt/apt.conf.d/01autoremove-kernels
+  rm /tmp/debian-{{ DIST }}-debootstrap/etc/apt/apt.conf.d/01autoremove-kernels
 fi
 if [ -e /tmp/debian-{{ DIST }}-mm/etc/apt/apt.conf.d/01autoremove-kernels ]; then
-	rm /tmp/debian-{{ DIST }}-mm/etc/apt/apt.conf.d/01autoremove-kernels
+  rm /tmp/debian-{{ DIST }}-mm/etc/apt/apt.conf.d/01autoremove-kernels
 fi
 # clear out /run except for /run/lock
 find /tmp/debian-{{ DIST }}-debootstrap/run/ -mindepth 1 -maxdepth 1 ! -name lock -print0 | xargs --no-run-if-empty -0 rm -r
 # debootstrap doesn't clean apt
 rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_{{ DIST }}_main_binary-{{ HOSTARCH }}_Packages \
-	/tmp/debian-{{ DIST }}-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_{{ DIST }}_InRelease \
-	/tmp/debian-{{ DIST }}-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_{{ DIST }}_Release \
-	/tmp/debian-{{ DIST }}-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_{{ DIST }}_Release.gpg
+  /tmp/debian-{{ DIST }}-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_{{ DIST }}_InRelease \
+  /tmp/debian-{{ DIST }}-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_{{ DIST }}_Release \
+  /tmp/debian-{{ DIST }}-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_{{ DIST }}_Release.gpg
 
 if [ "{{ VARIANT }}" = "-" ]; then
-	rm /tmp/debian-{{ DIST }}-debootstrap/etc/machine-id
-	rm /tmp/debian-{{ DIST }}-mm/etc/machine-id
-	rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/systemd/catalog/database
-	rm /tmp/debian-{{ DIST }}-mm/var/lib/systemd/catalog/database
+  rm /tmp/debian-{{ DIST }}-debootstrap/etc/machine-id
+  rm /tmp/debian-{{ DIST }}-mm/etc/machine-id
+  rm /tmp/debian-{{ DIST }}-debootstrap/var/lib/systemd/catalog/database
+  rm /tmp/debian-{{ DIST }}-mm/var/lib/systemd/catalog/database
 
-	cap=$(chroot /tmp/debian-{{ DIST }}-debootstrap /sbin/getcap /bin/ping)
-	expected="/bin/ping cap_net_raw=ep"
-	if [ "$cap" != "$expected" ]; then
-		echo "expected bin/ping to have capabilities $expected" >&2
-		echo "but debootstrap produced: $cap" >&2
-		exit 1
-	fi
-	cap=$(chroot /tmp/debian-{{ DIST }}-mm /sbin/getcap /bin/ping)
-	if [ "$cap" != "$expected" ]; then
-		echo "expected bin/ping to have capabilities $expected" >&2
-		echo "but mmdebstrap produced: $cap" >&2
-		exit 1
-	fi
+  case {{ DIST }} in oldstable | stable)
+    cap=$(chroot /tmp/debian-{{ DIST }}-debootstrap /sbin/getcap /bin/ping)
+    expected="/bin/ping cap_net_raw=ep"
+    if [ "$cap" != "$expected" ]; then
+      echo "expected bin/ping to have capabilities $expected" >&2
+      echo "but debootstrap produced: $cap" >&2
+      exit 1
+    fi
+    cap=$(chroot /tmp/debian-{{ DIST }}-mm /sbin/getcap /bin/ping)
+    if [ "$cap" != "$expected" ]; then
+      echo "expected bin/ping to have capabilities $expected" >&2
+      echo "but mmdebstrap produced: $cap" >&2
+      exit 1
+    fi
+    ;;
+  esac
 fi
+
 rm /tmp/debian-{{ DIST }}-mm/var/cache/apt/archives/lock
 rm /tmp/debian-{{ DIST }}-mm/var/lib/apt/extended_states
 rm /tmp/debian-{{ DIST }}-mm/var/lib/apt/lists/lock
@@ -127,59 +134,101 @@ rm /tmp/debian-{{ DIST }}-mm/var/lib/apt/lists/lock
 # the list of shells might be sorted wrongly
 # /var/lib/dpkg/triggers/File might be sorted wrongly
 for f in "/var/lib/dpkg/triggers/File" "/etc/shells"; do
-	f1="/tmp/debian-{{ DIST }}-debootstrap/$f"
-	f2="/tmp/debian-{{ DIST }}-mm/$f"
-	# both chroots must have the file
-	if [ ! -e "$f1" ] || [ ! -e "$f2" ]; then
-		continue
-	fi
-	# the file must be different
-	if cmp "$f1" "$f2" >&2; then
-		continue
-	fi
-	# then sort both
-	sort -o "$f1" "$f1"
-	sort -o "$f2" "$f2"
+  f1="/tmp/debian-{{ DIST }}-debootstrap/$f"
+  f2="/tmp/debian-{{ DIST }}-mm/$f"
+  # both chroots must have the file
+  if [ ! -e "$f1" ] || [ ! -e "$f2" ]; then
+    continue
+  fi
+  # the file must be different
+  if cmp "$f1" "$f2" >&2; then
+    continue
+  fi
+  # then sort both
+  sort -o "$f1" "$f1"
+  sort -o "$f2" "$f2"
 done
 
 # Because of unreproducible uids (#969631) we created the _apt user ourselves
 # and because passwd is not Essential:yes we didn't use useradd. But newer
 # versions of adduser and shadow will create a different /etc/shadow
 if [ "{{ VARIANT }}" = "-" ] && [ "{{ DIST}}" = oldstable ]; then
-	for f in shadow shadow-; do
-		if grep -q '^_apt:!:' /tmp/debian-{{ DIST }}-debootstrap/etc/$f; then
-			sed -i 's/^_apt:\*:\([^:]\+\):0:99999:7:::$/_apt:!:\1::::::/' /tmp/debian-{{ DIST }}-mm/etc/$f
-		fi
-	done
+  for f in shadow shadow-; do
+    if grep -q '^_apt:!:' /tmp/debian-{{ DIST }}-debootstrap/etc/$f; then
+      sed -i 's/^_apt:\*:\([^:]\+\):0:99999:7:::$/_apt:!:\1::::::/' /tmp/debian-{{ DIST }}-mm/etc/$f
+    fi
+  done
 fi
 
 for log in faillog lastlog; do
-	if ! cmp /tmp/debian-{{ DIST }}-debootstrap/var/log/$log /tmp/debian-{{ DIST }}-mm/var/log/$log >&2;then
-		# if the files differ, make sure they are all zeroes
-		cmp -n "$(stat -c %s "/tmp/debian-{{ DIST }}-debootstrap/var/log/$log")" "/tmp/debian-{{ DIST }}-debootstrap/var/log/$log" /dev/zero >&2
-		cmp -n "$(stat -c %s "/tmp/debian-{{ DIST }}-mm/var/log/$log")" "/tmp/debian-{{ DIST }}-mm/var/log/$log" /dev/zero >&2
-		# then delete them
-		rm /tmp/debian-{{ DIST }}-debootstrap/var/log/$log /tmp/debian-{{ DIST }}-mm/var/log/$log
-	fi
+  f1="/tmp/debian-{{ DIST }}-debootstrap/var/log/$log"
+  f2="/tmp/debian-{{ DIST }}-mm/var/log/$log"
+  # skip cmp if file is absent in both chroots
+  if [ ! -e "$f1" ] && [ ! -e "$f2" ]; then
+    continue
+  fi
+  if ! cmp "$f1" "$f2" >&2; then
+    # if the files differ, make sure they are all zeroes
+    cmp -n "$(stat -c %s "$f1")" "$f1" /dev/zero >&2
+    cmp -n "$(stat -c %s "$f2")" "$f2" /dev/zero >&2
+    # then delete them
+    rm "$f1" "$f2"
+  fi
 done
 
-# the order in which systemd and cron get installed differ and thus the order
-# of lines in /etc/group and /etc/gshadow differs
 if [ "{{ VARIANT }}" = "-" ]; then
-	for f in group group- gshadow gshadow-; do
-		for d in mm debootstrap; do
-			sort /tmp/debian-{{ DIST }}-$d/etc/$f > /tmp/debian-{{ DIST }}-$d/etc/$f.bak
-			mv /tmp/debian-{{ DIST }}-$d/etc/$f.bak /tmp/debian-{{ DIST }}-$d/etc/$f
-		done
-	done
+  # the order in which systemd and cron get installed differ and thus the order
+  # of lines in /etc/group and /etc/gshadow differs
+  for f in group group- gshadow gshadow-; do
+    for d in mm debootstrap; do
+      sort /tmp/debian-{{ DIST }}-$d/etc/$f >/tmp/debian-{{ DIST }}-$d/etc/$f.bak
+      mv /tmp/debian-{{ DIST }}-$d/etc/$f.bak /tmp/debian-{{ DIST }}-$d/etc/$f
+    done
+  done
+  # the order in which systemd and passwd get installed differ and thus
+  # the order of lines in /etc/shadow and /etc/shadow- differs
+  for f in shadow shadow-; do
+    for d in mm debootstrap; do
+      sort /tmp/debian-{{ DIST }}-$d/etc/$f >/tmp/debian-{{ DIST }}-$d/etc/$f.bak
+      mv /tmp/debian-{{ DIST }}-$d/etc/$f.bak /tmp/debian-{{ DIST }}-$d/etc/$f
+    done
+  done
+  # and since the order was different, ignore the *- files
+  for f in shadow- passwd-; do
+    for d in mm debootstrap; do
+      rm /tmp/debian-{{ DIST }}-$d/etc/$f
+    done
+  done
 fi
 
 # since debootstrap 1.0.133 there is no tzdata in the buildd variant and thus
 # debootstrap creates its own /etc/localtime
-if [ "{{ VARIANT }}" = "buildd" ]; then
-	[ "$(readlink /tmp/debian-{{ DIST }}-debootstrap/etc/localtime)" = /usr/share/zoneinfo/UTC ]
-	rm /tmp/debian-{{ DIST }}-debootstrap/etc/localtime
+if [ "{{ VARIANT }}" = "buildd" ] && [ "{{ DIST }}" != "stable" ] && [ "{{ DIST }}" != "oldstable" ]; then
+  [ "$(readlink /tmp/debian-{{ DIST }}-debootstrap/etc/localtime)" = /usr/share/zoneinfo/UTC ]
+  rm /tmp/debian-{{ DIST }}-debootstrap/etc/localtime
 fi
+
+# starting with systemd 255 upstream dropped splitusr support and depending on
+# the installation order, symlink targets are prefixed with /usr or not
+# See #1060000 and #1054137
+case {{ DIST }} in testing | unstable)
+  for f in multi-user.target.wants/e2scrub_reap.service timers.target.wants/apt-daily-upgrade.timer timers.target.wants/apt-daily.timer timers.target.wants/e2scrub_all.timer; do
+    for d in mm debootstrap; do
+      [ -L "/tmp/debian-{{ DIST }}-$d/etc/systemd/system/$f" ] || continue
+      oldlink="$(readlink "/tmp/debian-{{ DIST }}-$d/etc/systemd/system/$f")"
+      case $oldlink in
+        /usr/*) : ;;
+        /*) oldlink="/usr$oldlink" ;;
+        *)
+          echo unexpected >&2
+          exit 1
+          ;;
+      esac
+      ln -sf "$oldlink" "/tmp/debian-{{ DIST }}-$d/etc/systemd/system/$f"
+    done
+  done
+  ;;
+esac
 
 # check if the file content differs
 diff --unified --no-dereference --recursive /tmp/debian-{{ DIST }}-debootstrap /tmp/debian-{{ DIST }}-mm >&2
@@ -189,13 +238,14 @@ diff --unified --no-dereference --recursive /tmp/debian-{{ DIST }}-debootstrap /
 find /tmp/debian-{{ DIST }}-debootstrap /tmp/debian-{{ DIST }}-mm -type d -print0 | xargs -0 touch --date="@{{ SOURCE_DATE_EPOCH }}"
 # debootstrap never ran apt -- fixing permissions
 for d in ./var/lib/apt/lists/partial ./var/cache/apt/archives/partial; do
-	chroot /tmp/debian-{{ DIST }}-debootstrap chmod 0700 $d
-	chroot /tmp/debian-{{ DIST }}-debootstrap chown "$(id -u _apt):root" $d
+  unmergedPATH="$PATH$(if [ "{{ DIST }}" = oldstable ]; then echo :/bin:/sbin; fi)"
+  PATH="$unmergedPATH" chroot /tmp/debian-{{ DIST }}-debootstrap chmod 0700 $d
+  PATH="$unmergedPATH" chroot /tmp/debian-{{ DIST }}-debootstrap chown "$(id -u _apt):root" $d
 done
 tar -C /tmp/debian-{{ DIST }}-debootstrap --numeric-owner --sort=name --clamp-mtime --mtime="$(date --utc --date=@{{ SOURCE_DATE_EPOCH }} --iso-8601=seconds)" -cf /tmp/root1.tar .
 tar -C /tmp/debian-{{ DIST }}-mm --numeric-owner --sort=name --clamp-mtime --mtime="$(date --utc --date=@{{ SOURCE_DATE_EPOCH }} --iso-8601=seconds)" -cf /tmp/root2.tar .
-tar --full-time --verbose -tf /tmp/root1.tar > /tmp/root1.tar.list
-tar --full-time --verbose -tf /tmp/root2.tar > /tmp/root2.tar.list
+tar --full-time --verbose -tf /tmp/root1.tar >/tmp/root1.tar.list
+tar --full-time --verbose -tf /tmp/root2.tar >/tmp/root2.tar.list
 diff -u /tmp/root1.tar.list /tmp/root2.tar.list >&2
 rm /tmp/root1.tar /tmp/root2.tar /tmp/root1.tar.list /tmp/root2.tar.list
 

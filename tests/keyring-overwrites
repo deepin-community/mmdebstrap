@@ -10,6 +10,6 @@ ret=0
 # make sure that no [signedby=...] managed to make it into the sources.list
 echo "deb {{ MIRROR }} {{ DIST }} main" | cmp /tmp/debian-chroot/etc/apt/sources.list -
 if [ "$ret" = 0 ]; then
-	echo expected failure but got exit $ret >&2
-	exit 1
+  echo expected failure but got exit $ret >&2
+  exit 1
 fi

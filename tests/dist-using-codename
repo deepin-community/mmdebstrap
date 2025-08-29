@@ -8,6 +8,6 @@ trap "rm -f InRelease; rm -rf /tmp/debian-chroot.tar /tmp/expected" EXIT INT TER
 /usr/lib/apt/apt-helper download-file "{{ MIRROR }}/dists/{{ DIST }}/InRelease" InRelease
 codename=$(awk '/^Codename: / { print $2; }' InRelease)
 {{ CMD }} --mode={{ MODE }} --variant=apt "$codename" /tmp/debian-chroot.tar {{ MIRROR }}
-echo "deb {{ MIRROR }} $codename main" > /tmp/expected
+echo "deb {{ MIRROR }} $codename main" >/tmp/expected
 tar --to-stdout --extract --file /tmp/debian-chroot.tar ./etc/apt/sources.list \
-	| diff -u /tmp/expected -
+  | diff -u /tmp/expected -

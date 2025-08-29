@@ -1,5 +1,7 @@
-Tests: testsuite
+Tests:
+ testsuite,
 Depends:
+ dpkg-dev,
  apt-cudf,
  arch-test,
  aspcud,
@@ -7,12 +9,13 @@ Depends:
  debian-archive-keyring,
  debootstrap (>= 1.0.128),
  diffoscope,
- dpkg-dev,
+ e2fsprogs,
  fakechroot,
  fakeroot,
  genext2fs,
  gpg,
  grep-dctrl,
+ iputils-ping (>= 3:20240905-1),
  libcap2-bin,
  libperl-critic-perl,
  mmdebstrap,
@@ -23,10 +26,16 @@ Depends:
  python3-apt,
  python3-debian,
  shellcheck,
+ shfmt,
  squashfs-tools-ng,
  sudo,
+ tzdata (>= 2024b-5),
  uidmap,
-Restrictions: needs-root, allow-stderr, skippable
+ uuid-runtime,
+Restrictions:
+ allow-stderr,
+ needs-root,
+ skippable,
 
 # add a manual trigger on those packages that in the past broke this test
 #
@@ -35,7 +44,7 @@ Restrictions: needs-root, allow-stderr, skippable
 #      | passwd                 #1004710
 #      | python3                #1010368, #1010366
 #      | man-db                 #1010957
-# 2022 | libc-bin               #1017590
+# 2022 | glibc                  #1017590
 #      | cron                   #1012622, #1020603
 #      | kmod                   #1020605
 #      | ifupdown               #1020604
@@ -50,20 +59,34 @@ Restrictions: needs-root, allow-stderr, skippable
 #      | dash                   #989632
 #      | adduser                #1039709                     check-against-debootstrap-dist
 #      | debianutils            #1050752                     chrootless
-#      | usrmerge               #1050755                     chrootless-foreign
+#      | usrmerge               #1050755, #1053671           chrootless-foreign, merged-fakechroot-inside-unmerged-chroot
+# -----+-----------------------------------------------------------------------
+#      | dpkg                   #1059982                     remove-start-stop-daemon-and-policy-rc-d-in-hook
+#      | findutils              #1072986                     empty-sources.list
+# 2024 | base-files             #1064459                     check-against-debootstrap-dist, eatmydata-via-hook-dir, jessie-or-older, missing-dev-sys-proc-inside-the-chroot, pivot_root
+#      | util-linux             #1064459                     check-against-debootstrap-dist, eatmydata-via-hook-dir, jessie-or-older, missing-dev-sys-proc-inside-the-chroot, pivot_root
+#      | iputils-ping           #1008281                     check-against-debootstrap-dist, tarfilter-idshift
+# -----+-----------------------------------------------------------------------
+# 2025 | dash                   #1092494                     missing-dev-sys-proc-inside-the-chroot compare-output-with-pre-seeded-var-cache-apt-archives
+#      | tzdata                 #822733                      multiple-include
 #
-Features: test-name=hint-testsuite-triggers
+Features:
+ test-name=hint-testsuite-triggers,
 Test-Command: false
 Depends:
  adduser,
+ base-files,
  cron,
  dash,
  debian-archive-keyring,
  debianutils,
  debootstrap,
  doc-debian,
+ dpkg,
  fakeroot,
+ findutils,
  ifupdown,
+ iputils-ping,
  kmod,
  libc-bin,
  libgdbm-compat4,
@@ -73,7 +96,9 @@ Depends:
  python3,
  tzdata,
  usrmerge,
-Restrictions: hint-testsuite-triggers
+ util-linux,
+Restrictions:
+ hint-testsuite-triggers,
 
 # FIXME: in an ideal world, debci would have enough computational resources
 #        to run this autopkgtest for all the packages in essential and
@@ -95,6 +120,7 @@ Restrictions: hint-testsuite-triggers
 ## Since library binary package names change frequently, this list has to be
 ## updated regularly. Use the debian/compute_pkgset.py script to update the
 ## list of dependencies.
+## FIXME: find out why util-linux or libc6 are missing from the list below
 #Features: test-name=hint-testsuite-triggers
 #Test-Command: false
 #Depends: acl, adduser, anacron, apt, apt-listchanges, base-files, base-passwd,

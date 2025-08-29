@@ -2,15 +2,41 @@
 set -eu
 export LC_ALL=C.UTF-8
 export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
-trap "rm -f /tmp/chrootless.tar /tmp/root.tar" EXIT INT TERM
-# we need --hook-dir=./hooks/merged-usr because usrmerge does not understand
-# DPKG_ROOT
+trap "rm -f /tmp/chrootless.tar /tmp/root.tar /tmp/before.md5 /tmp/before.tartv /tmp/after.md5 /tmp/after.tartv" EXIT INT TERM
+
+rootfsmd5() {
+  bname="$1"
+  # dhclient changes /etc/resolv.conf, so it changes /etc and we thus must
+  # manually adjust the timestamp.
+  # There is a race condition here. dhclient could change /etc after touch but
+  # before tar packages it.
+  touch --date="@{{ SOURCE_DATE_EPOCH }}" /etc
+  (tar --one-file-system --anchored \
+    --exclude="./etc/resolv.conf" \
+    --exclude="./var/lib/dhcp/dhclient*.leases" \
+    --exclude="./var/log/journal/*" \
+    --exclude="./var/log/wtmp" \
+    --exclude="./var/backups" \
+    --exclude="./var/lib/apt" \
+    --exclude="./var/lib/systemd/timers" \
+    -C / --sort=name \
+    -c ./usr ./bin ./etc ./lib ./sbin ./var \
+    | tee /dev/fd/3 | md5sum >"/tmp/$bname.md5") 3>&1 | tar tv >"/tmp/$bname.tartv"
+}
+
+rootfsmd5 before
 for INCLUDE in '' 'apt' 'apt,build-essential' 'systemd-sysv'; do
-	for MODE in root chrootless; do
-		{{ CMD }} --mode=$MODE --variant={{ VARIANT }} --hook-dir=./hooks/merged-usr \
-			${INCLUDE:+--include="$INCLUDE"} \
-			{{ DIST }} "/tmp/$MODE.tar" {{ MIRROR }}
-	done
-	cmp /tmp/root.tar /tmp/chrootless.tar || diffoscope /tmp/root.tar /tmp/chrootless.tar
-	rm /tmp/chrootless.tar /tmp/root.tar
+  for MODE in root chrootless; do
+    {{ CMD }} --mode=$MODE --variant={{ VARIANT }} \
+      ${INCLUDE:+--include="$INCLUDE"} --skip=check/chrootless \
+      {{ DIST }} "/tmp/$MODE.tar" {{ MIRROR }}
+  done
+  cmp /tmp/root.tar /tmp/chrootless.tar || diffoscope /tmp/root.tar /tmp/chrootless.tar
+  rm /tmp/chrootless.tar /tmp/root.tar
 done
+rootfsmd5 after
+if ! cmp /tmp/before.md5 /tmp/after.md5; then
+  echo "found changes outside the chroot:" >&2
+  diff -u /tmp/before.tartv /tmp/after.tartv
+  exit 1
+fi

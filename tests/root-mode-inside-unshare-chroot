@@ -10,17 +10,17 @@ export LC_ALL=C.UTF-8
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
-cat << 'SCRIPT' > /tmp/script.sh
+cat <<'SCRIPT' >/tmp/script.sh
 #!/bin/sh
 set -eu
 rootfs="$1"
@@ -33,8 +33,8 @@ chroot "$rootfs" env --chdir=/mnt \
 SCRIPT
 chmod +x /tmp/script.sh
 $prefix {{ CMD }} --mode={{ MODE }} --variant=apt --include=perl,mount \
-	--customize-hook=/tmp/script.sh \
-	--customize-hook="download /tmp/debian-chroot.tar /tmp/debian-chroot.tar" \
-	{{ DIST }} /dev/null {{ MIRROR }}
+  --customize-hook=/tmp/script.sh \
+  --customize-hook="download /tmp/debian-chroot.tar /tmp/debian-chroot.tar" \
+  {{ DIST }} /dev/null {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -
 rm /tmp/debian-chroot.tar /tmp/script.sh

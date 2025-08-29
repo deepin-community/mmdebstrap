@@ -5,6 +5,6 @@ ret=0
 {{ CMD }} --mode=root --variant=apt --customize-hook='chroot "$1" sh -c "exit 1"' {{ DIST }} /tmp/debian-chroot {{ MIRROR }} || ret=$?
 rm -r /tmp/debian-chroot
 if [ "$ret" = 0 ]; then
-	echo expected failure but got exit $ret >&2
-	exit 1
+  echo expected failure but got exit $ret >&2
+  exit 1
 fi

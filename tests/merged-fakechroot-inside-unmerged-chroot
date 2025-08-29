@@ -9,7 +9,7 @@ export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
 trap "rm -f /tmp/chroot-fakechroot.tar /tmp/chroot-root.tar" EXIT INT TERM
 [ "$(whoami)" = "root" ]
 {{ CMD }} --mode=root --variant=apt --hook-dir=./hooks/merged-usr {{ DIST }} /tmp/chroot-root.tar {{ MIRROR }}
-cat << 'SCRIPT' > script.sh
+cat <<'SCRIPT' >script.sh
 #!/bin/sh
 set -exu
 rootfs="$1"
@@ -39,11 +39,11 @@ chroot "$rootfs" env --chdir=/mnt \
 SCRIPT
 chmod +x script.sh
 {{ CMD }} --mode=root --variant=apt --include=perl,python3,passwd,fakeroot,fakechroot \
-	--hook-dir=./hooks/no-merged-usr \
-	--customize-hook='chroot "$1" useradd --home-dir /home/user --create-home user' \
-	--customize-hook='chroot "$1" sh -c "exec test \"\$(realpath -e /usr/bin/ldd)\" = /usr/bin/ldd"' \
-	--customize-hook='chroot "$1" sh -c "exec test ! -e /usr/sbin/ldconfig"' \
-	--customize-hook=./script.sh \
-	--customize-hook="copy-out /tmp/chroot-fakechroot.tar /tmp" \
-	{{ DIST }} /dev/null {{ MIRROR }}
+  --hook-dir=./hooks/no-merged-usr \
+  --customize-hook='chroot "$1" useradd --home-dir /home/user --create-home user' \
+  --customize-hook='chroot "$1" sh -c "exec test \"\$(realpath -e /usr/bin/ldd)\" = /usr/bin/ldd"' \
+  --customize-hook='chroot "$1" sh -c "exec test ! -e /usr/sbin/ldconfig"' \
+  --customize-hook=./script.sh \
+  --customize-hook="copy-out /tmp/chroot-fakechroot.tar /tmp" \
+  {{ DIST }} /dev/null {{ MIRROR }}
 cmp /tmp/chroot-fakechroot.tar /tmp/chroot-root.tar || diffoscope /tmp/chroot-fakechroot.tar /tmp/chroot-root.tar

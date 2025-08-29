@@ -2,5 +2,7 @@
 set -eu
 export LC_ALL=C.UTF-8
 trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
-{{ CMD }} --mode={{ MODE }} --variant=apt --customize-hook='rm "$1/usr/sbin/policy-rc.d"; rm "$1/sbin/start-stop-daemon"' {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+{{ CMD }} --mode={{ MODE }} --variant=apt \
+  --customize-hook='rm "$1/usr/sbin/policy-rc.d"; rm "$1/usr/sbin/start-stop-daemon"' \
+  {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

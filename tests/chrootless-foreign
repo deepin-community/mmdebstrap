@@ -4,65 +4,55 @@ export LC_ALL=C.UTF-8
 export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
 trap "rm -f /tmp/chrootless.tar /tmp/root.tar" EXIT INT TERM
 if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test modifies the system and should only be run inside a container" >&2
-	exit 1
+  echo "this test modifies the system and should only be run inside a container" >&2
+  exit 1
 fi
 
 deb2qemu() {
-	case "$1" in
-		amd64) echo x86_64;;
-		arm64) echo aarch64;;
-		armel|armhf) echo arm;;
-		ppc64el) echo ppc64le;;
-		*) echo "$1";;
-	esac
+  case "$1" in
+    amd64) echo x86_64 ;;
+    arm64) echo aarch64 ;;
+    armel | armhf) echo arm ;;
+    ppc64el) echo ppc64le ;;
+    *) echo "$1" ;;
+  esac
 }
 if [ "$(dpkg --print-architecture)" = "arm64" ]; then
-	arch=amd64
+  arch=amd64
 else
-	arch=arm64
+  arch=arm64
 fi
 
 [ "$(id -u)" -eq 0 ]
 [ -e "/proc/sys/fs/binfmt_misc/qemu-$(deb2qemu "$arch")" ]
 
-
-# we need --hook-dir=./hooks/merged-usr because usrmerge does not understand
-# DPKG_ROOT
-#
-# dpkg is unable to install architecture arch:all packages with a
-# dependency on an arch:any package (perl-modules-5.34 in this case)
-# inside foreign architecture chrootless chroots, because dpkg will use
-# its own architecture as the native architecture, see #825385 and #1020533
-# So we are not testing the installation of apt,build-essential here.
-for INCLUDE in '' 'apt' 'systemd-sysv'; do
-	echo 1 > "/proc/sys/fs/binfmt_misc/qemu-$(deb2qemu "$arch")"
-	arch-test "$arch"
-	{{ CMD }} --mode=root --architecture="$arch" --variant={{ VARIANT }} \
-		--hook-dir=./hooks/merged-usr ${INCLUDE:+--include="$INCLUDE"} \
-		{{ DIST }} "/tmp/root.tar" {{ MIRROR }}
-	echo 0 > "/proc/sys/fs/binfmt_misc/qemu-$(deb2qemu "$arch")"
-	arch-test "$arch" && exit 1
-	{{ CMD }} --mode=chrootless --architecture="$arch" --variant={{ VARIANT }} \
-		--hook-dir=./hooks/merged-usr ${INCLUDE:+--include="$INCLUDE"} \
-		{{ DIST }} "/tmp/chrootless.tar" {{ MIRROR }}
-	# when creating a foreign architecture chroot, the tarballs are not
-	# bit-by-bit identical but contain a few remaining differences:
-	#
-	#  * /etc/ld.so.cache -- hard problem, must be solved in glibc upstream
-	#  * /var/lib/dpkg/triggers -- #990712
-	#  * /var/cache/debconf/*.dat-old -- needs investigation
-	for tar in root chrootless; do
-		<"/tmp/$tar.tar" \
-		./tarfilter \
-			--path-exclude=/var/cache/debconf/config.dat-old \
-			--path-exclude=/var/cache/debconf/templates.dat-old \
-			--path-exclude=/etc/ld.so.cache \
-			--path-exclude=/var/lib/dpkg/triggers/File \
-			--path-exclude=/var/lib/dpkg/triggers/ldconfig \
-			> "/tmp/$tar.tar.tmp"
-		mv "/tmp/$tar.tar.tmp" "/tmp/$tar.tar"
-	done
-	cmp /tmp/root.tar /tmp/chrootless.tar || diffoscope /tmp/root.tar /tmp/chrootless.tar
-	rm /tmp/chrootless.tar /tmp/root.tar
+for INCLUDE in '' 'apt' 'apt,build-essential' 'systemd-sysv'; do
+  echo 1 >"/proc/sys/fs/binfmt_misc/qemu-$(deb2qemu "$arch")"
+  arch-test "$arch"
+  {{ CMD }} --mode=root --architecture="$arch" --variant={{ VARIANT }} \
+    ${INCLUDE:+--include="$INCLUDE"} \
+    {{ DIST }} "/tmp/root.tar" {{ MIRROR }}
+  echo 0 >"/proc/sys/fs/binfmt_misc/qemu-$(deb2qemu "$arch")"
+  arch-test "$arch" && exit 1
+  {{ CMD }} --mode=chrootless --architecture="$arch" --variant={{ VARIANT }} \
+    ${INCLUDE:+--include="$INCLUDE"} \
+    --skip=check/chrootless {{ DIST }} "/tmp/chrootless.tar" {{ MIRROR }}
+  # when creating a foreign architecture chroot, the tarballs are not
+  # bit-by-bit identical but contain a few remaining differences:
+  #
+  #  * /etc/ld.so.cache -- hard problem, must be solved in glibc upstream
+  #  * /var/lib/dpkg/triggers -- #990712
+  #  * /var/cache/debconf/*.dat-old -- needs investigation
+  for tar in root chrootless; do
+    ./tarfilter <"/tmp/$tar.tar" \
+      --path-exclude=/var/cache/debconf/config.dat-old \
+      --path-exclude=/var/cache/debconf/templates.dat-old \
+      --path-exclude=/etc/ld.so.cache \
+      --path-exclude=/var/lib/dpkg/triggers/File \
+      --path-exclude=/var/lib/dpkg/triggers/ldconfig \
+      >"/tmp/$tar.tar.tmp"
+    mv "/tmp/$tar.tar.tmp" "/tmp/$tar.tar"
+  done
+  cmp /tmp/root.tar /tmp/chrootless.tar || diffoscope /tmp/root.tar /tmp/chrootless.tar
+  rm /tmp/chrootless.tar /tmp/root.tar
 done

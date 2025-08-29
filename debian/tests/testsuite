@@ -104,6 +104,8 @@ ln -s "$SRC/gpgvnoexpkeysig" gpgvnoexpkeysig
 ln -s "$SRC/coverage.py" coverage.py
 ln -s "$SRC/coverage.txt" coverage.txt
 ln -s "$SRC/caching_proxy.py" caching_proxy.py
+ln -s "$SRC/.perltidyrc" .perltidyrc
+ln -s "$SRC/mmdebstrap-autopkgtest-build-qemu" mmdebstrap-autopkgtest-build-qemu
 cp -a "$SRC/tests" .
 
 # on Debian Salsa CI, $AUTOPKGTEST_NORMAL_USER is empty
@@ -171,7 +173,7 @@ TIMEOUT=$((10000-$(date +%s)+$TIME_BEGIN-10))
 # HAVE_QEMU=no because there is no kvm kernel module
 # HAVE_BINFMT=no because there is no binfmt_misc kernel module
 ret=0
-timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap --setup-hook=$SRC/debian/tests/copy_host_apt_config --hook-dir=$SRC/hooks/file-mirror-automount" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no USE_HOST_APT_CONFIG=yes "$SRC/coverage.sh" --exitfirst || ret=$?
+timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap --setup-hook=$SRC/debian/tests/sourcesfilter --hook-dir=$SRC/hooks/file-mirror-automount" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=$RUN_MA_SAME_TESTS HAVE_QEMU=no HAVE_BINFMT=no USE_HOST_APT_CONFIG=yes "$SRC/coverage.sh" --exitfirst || ret=$?
 if [ "$ret" -eq 124 ]; then
 	echo "command timed out after $TIMEOUT seconds" >&2
 	exit 77
@@ -210,7 +212,7 @@ TIMEOUT=$((10000-$(date +%s)+$TIME_BEGIN-10))
 SKIPPED_TESTS=$(grep-dctrl --exact-match --field Needs-APT-Config true --no-field-names --show-field=Test < coverage.txt)
 # for tar1.txt also add create-directory test
 SKIPPED_TESTS="create-directory $SKIPPED_TESTS"
-timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=no HAVE_QEMU=no HAVE_BINFMT=no "$SRC/coverage.py" --exitfirst $SKIPPED_TESTS || exit 77
+timeout $TIMEOUT runuser -u "$AUTOPKGTEST_NORMAL_USER" -- env CMD="mmdebstrap" DEFAULT_DIST=$DEFAULT_DIST RUN_MA_SAME_TESTS=no HAVE_QEMU=no HAVE_BINFMT=no http_proxy= "$SRC/coverage.py" --exitfirst $SKIPPED_TESTS || exit 77
 
 du -hs ./shared
 

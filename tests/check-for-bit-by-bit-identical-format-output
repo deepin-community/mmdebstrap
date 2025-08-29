@@ -5,23 +5,23 @@ export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
 
 trap "rm -f /tmp/debian-chroot-{{ MODE }}.{{ FORMAT }}" EXIT INT TERM
 
-case {{ MODE }} in unshare|fakechroot) : ;; *) exit 1;; esac
+case {{ MODE }} in unshare | fakechroot) : ;; *) exit 1 ;; esac
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
 $prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} {{ DIST }} /tmp/debian-chroot-{{ MODE }}.{{ FORMAT }} {{ MIRROR }}
 cmp ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }} /tmp/debian-chroot-{{ MODE }}.{{ FORMAT }} \
-	|| diffoscope ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }} /tmp/debian-chroot-{{ MODE }}.{{ FORMAT }}
+  || diffoscope ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }} /tmp/debian-chroot-{{ MODE }}.{{ FORMAT }}
 
 # we cannot test chrootless mode here, because mmdebstrap relies on the
 # usrmerge package to set up merged-/usr and that doesn't work in chrootless

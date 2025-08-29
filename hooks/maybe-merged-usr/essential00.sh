@@ -15,6 +15,10 @@ case "$ver" in
 		echo "usr-is-merged package from src:usrmerge installed -- not running merged-usr essential hook" >&2
 		exit 0
 		;;
+	'not-installed  ')
+		echo "usr-is-merged was not installed in a previous hook -- not running merged-usr essential hook" >&2
+		exit 0
+		;;
 	*)
 		echo "unexpected situation for package usr-is-merged: $ver" >&2
 		exit 1

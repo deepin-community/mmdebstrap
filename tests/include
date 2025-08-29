@@ -6,7 +6,6 @@ trap "rm -rf /tmp/debian-chroot" EXIT INT TERM
 rm /tmp/debian-chroot/usr/share/doc-base/doc-debian.debian-*
 rm -r /tmp/debian-chroot/usr/share/doc/debian
 rm -r /tmp/debian-chroot/usr/share/doc/doc-debian
-rm /tmp/debian-chroot/var/lib/apt/extended_states
 rm /tmp/debian-chroot/var/lib/dpkg/info/doc-debian.list
 rm /tmp/debian-chroot/var/lib/dpkg/info/doc-debian.md5sums
 tar -C /tmp/debian-chroot --one-file-system -c . | tar -t | sort | diff -u tar1.txt -

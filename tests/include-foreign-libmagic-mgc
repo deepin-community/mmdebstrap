@@ -6,20 +6,41 @@
 #   - installs only few files
 #   - doesn't change its name regularly (like gcc-*-base)
 
+case "$(dpkg --print-architecture)" in
+  arm64)
+    native_arch=arm64
+    foreign_arch=amd64
+    ;;
+  amd64)
+    native_arch=amd64
+    foreign_arch=arm64
+    ;;
+  *)
+    echo "unsupported native architecture" >&2
+    exit 1
+    ;;
+esac
+
 set -eu
 export LC_ALL=C.UTF-8
-{{ CMD }} --mode=root --variant=apt --architectures=amd64,arm64 --include=libmagic-mgc:arm64 {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
-{ echo "amd64"; echo "arm64"; } | cmp /tmp/debian-chroot/var/lib/dpkg/arch -
-rm /tmp/debian-chroot/var/lib/apt/extended_states
-rm /tmp/debian-chroot/var/lib/dpkg/info/libmagic-mgc.list
-rm /tmp/debian-chroot/var/lib/dpkg/info/libmagic-mgc.md5sums
+{{ CMD }} --mode=root --variant=apt \
+  --architectures="$native_arch,$foreign_arch" \
+  --include="libmagic-mgc:$foreign_arch" \
+  {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+{
+  echo "$native_arch"
+  echo "$foreign_arch"
+} | cmp /tmp/debian-chroot/var/lib/dpkg/arch -
 rm /tmp/debian-chroot/usr/lib/file/magic.mgc
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/README.Debian
+rm -f /tmp/debian-chroot/usr/share/doc/libmagic-mgc/"changelog.Debian.$foreign_arch.gz"
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/changelog.Debian.gz
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/changelog.gz
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/copyright
 rm /tmp/debian-chroot/usr/share/file/magic.mgc
 rm /tmp/debian-chroot/usr/share/misc/magic.mgc
+rm /tmp/debian-chroot/var/lib/dpkg/info/libmagic-mgc.list
+rm /tmp/debian-chroot/var/lib/dpkg/info/libmagic-mgc.md5sums
 rmdir /tmp/debian-chroot/usr/share/doc/libmagic-mgc/
 rmdir /tmp/debian-chroot/usr/share/file/magic/
 rmdir /tmp/debian-chroot/usr/share/file/

@@ -2,8 +2,8 @@
 set -eu
 export LC_ALL=C.UTF-8
 trap "rm -f /tmp/debian-chroot.tar /tmp/sources.list" EXIT INT TERM
-echo "deb {{ MIRROR }} {{ DIST }} main" > /tmp/sources.list
+echo "deb {{ MIRROR }} {{ DIST }} main" >/tmp/sources.list
 {{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} /tmp/debian-chroot.tar /tmp/sources.list
 tar -tf /tmp/debian-chroot.tar \
-	| sed 's#^./etc/apt/sources.list.d/0000sources.list$#./etc/apt/sources.list#' \
-	| sort | diff -u tar1.txt -
+  | sed 's#^./etc/apt/sources.list.d/0000sources.list$#./etc/apt/sources.list#' \
+  | sort | diff -u tar1.txt -

@@ -2,23 +2,23 @@
 set -eu
 export LC_ALL=C.UTF-8
 if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test modifies the system and should only be run inside a container" >&2
-	exit 1
+  echo "this test modifies the system and should only be run inside a container" >&2
+  exit 1
 fi
 for f in /etc/resolv.conf /etc/hostname; do
-	# preserve original content
-	cat "$f" > "$f.bak"
-	# in case $f is a symlink, we replace it by a real file
-	if [ -L "$f" ]; then
-		rm "$f"
-		cp "$f.bak" "$f"
-	fi
-	chmod 644 "$f"
-	[ "$(stat --format=%A "$f")" = "-rw-r--r--" ]
+  # preserve original content
+  cat "$f" >"$f.bak"
+  # in case $f is a symlink, we replace it by a real file
+  if [ -L "$f" ]; then
+    rm "$f"
+    cp "$f.bak" "$f"
+  fi
+  chmod 644 "$f"
+  [ "$(stat --format=%A "$f")" = "-rw-r--r--" ]
 done
 {{ CMD }} --variant=custom --mode={{ MODE }} {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
 for f in /etc/resolv.conf /etc/hostname; do
-	[ "$(stat --format=%A "/tmp/debian-chroot/$f")" = "-rw-r--r--" ]
+  [ "$(stat --format=%A "/tmp/debian-chroot/$f")" = "-rw-r--r--" ]
 done
 rm /tmp/debian-chroot/dev/console
 rm /tmp/debian-chroot/dev/fd
@@ -42,12 +42,12 @@ rm /tmp/debian-chroot/var/lib/dpkg/arch
 # the rest should be empty directories that we can rmdir recursively
 find /tmp/debian-chroot -depth -print0 | xargs -0 rmdir
 for f in /etc/resolv.conf /etc/hostname; do
-	chmod 755 "$f"
-	[ "$(stat --format=%A "$f")" = "-rwxr-xr-x" ]
+  chmod 755 "$f"
+  [ "$(stat --format=%A "$f")" = "-rwxr-xr-x" ]
 done
 {{ CMD }} --variant=custom --mode={{ MODE }} {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
 for f in /etc/resolv.conf /etc/hostname; do
-	[ "$(stat --format=%A "/tmp/debian-chroot/$f")" = "-rwxr-xr-x" ]
+  [ "$(stat --format=%A "/tmp/debian-chroot/$f")" = "-rwxr-xr-x" ]
 done
 rm /tmp/debian-chroot/dev/console
 rm /tmp/debian-chroot/dev/fd
@@ -71,13 +71,13 @@ rm /tmp/debian-chroot/var/lib/dpkg/arch
 # the rest should be empty directories that we can rmdir recursively
 find /tmp/debian-chroot -depth -print0 | xargs -0 rmdir
 for f in /etc/resolv.conf /etc/hostname; do
-	rm "$f"
-	ln -s "$f.bak" "$f"
-	[ "$(stat --format=%A "$f")" = "lrwxrwxrwx" ]
+  rm "$f"
+  ln -s "$f.bak" "$f"
+  [ "$(stat --format=%A "$f")" = "lrwxrwxrwx" ]
 done
 {{ CMD }} --variant=custom --mode={{ MODE }} {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
 for f in /etc/resolv.conf /etc/hostname; do
-	[ "$(stat --format=%A "/tmp/debian-chroot/$f")" = "-rw-r--r--" ]
+  [ "$(stat --format=%A "/tmp/debian-chroot/$f")" = "-rw-r--r--" ]
 done
 rm /tmp/debian-chroot/dev/console
 rm /tmp/debian-chroot/dev/fd

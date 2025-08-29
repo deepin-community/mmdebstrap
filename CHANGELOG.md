@@ -1,3 +1,70 @@
+1.5.7 (2025-04-08)
+------------------
+
+ - support for elxr Debian derivative
+ - support loong64
+ - mmdebstrap-autopkgtest-build-qemu: add --sshkey=...
+
+1.5.6 (2025-01-11)
+------------------
+
+ - bugfix release
+
+1.5.5 (2025-01-09)
+------------------
+
+ - do not run dpkg-preconfigure via DPkg::Pre-Install-Pkgs hook
+ - m-a-b-q: support passing args to mmdebstrap
+
+1.5.4 (2024-10-28)
+------------------
+
+ - do not generate apt sources.list entry if SUITE is empty
+
+1.5.3 (2024-09-13)
+------------------
+
+ - tidy up any zombie processes
+ - chrootless hurd-i386
+ - add --skip=cleanup/reproducible/machine-id
+ - m-a-b-q: replace test_installed by dpkg-checkbuilddeps
+
+1.5.2 (2024-06-26)
+------------------
+
+ - mmdebstrap-autopkgtest-build-qemu produces bit-by-bit reproducible output
+
+1.5.1 (2024-06-03)
+------------------
+
+ - in root and unshare mode, run 'mount --make-rprivate /' before bind-mounting
+ - switch apt variant from using 'apt-get dist-upgrade' to apt patterns
+
+1.5.0 (2024-05-14)
+------------------
+
+ - add --format=ext4
+
+1.4.3 (2024-02-01)
+------------------
+
+ - take hard links into account when computing disk usage
+
+1.4.2 (2024-01-29)
+------------------
+
+ - allow for start-stop-daemon to be in either /sbin or /usr/sbin
+ - mmdebstrap-autopkgtest-build-qemu: fix octal mode computation and hostname
+
+1.4.1 (2024-01-09)
+------------------
+
+ - set DPkg::Chroot-Directory in APT_CONFIG to simplify calling apt in hooks
+ - disallow running chrootless as root without fakeroot unless
+   --skip=check/chrootless is used
+ - only print short --help output if wrong args are passed
+ - read files passed as --aptopt and --dpkgopt outside the unshared namespace
+
 1.4.0 (2023-10-24)
 ------------------
 

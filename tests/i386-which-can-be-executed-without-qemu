@@ -2,40 +2,41 @@
 set -eu
 export LC_ALL=C.UTF-8
 if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test modifies the system and should only be run inside a container" >&2
-	exit 1
+  echo "this test modifies the system and should only be run inside a container" >&2
+  exit 1
 fi
 # remove qemu just to be sure
-apt-get remove --yes qemu-user-static binfmt-support qemu-user
+apt-get remove --yes qemu-user-binfmt binfmt-support qemu-user
 {{ CMD }} --mode={{ MODE }} --variant=apt --architectures=i386 {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 # we ignore differences between architectures by ignoring some files
 # and renaming others
-{ tar -tf /tmp/debian-chroot.tar \
-	| grep -v '^\./usr/bin/i386$' \
-	| grep -v '^\./usr/lib/ld-linux\.so\.2$' \
-	| grep -v '^\./usr/lib/i386-linux-gnu/ld-linux\.so\.2$' \
-	| grep -v '^\./usr/lib/gcc/i686-linux-gnu/$' \
-	| grep -v '^\./usr/lib/gcc/i686-linux-gnu/[0-9]\+/$' \
-	| grep -v '^\./usr/share/man/man8/i386\.8\.gz$' \
-	| grep -v '^\./usr/share/doc/[^/]\+/changelog\(\.Debian\)\?\.i386\.gz$' \
-	| sed 's/i386-linux-gnu/x86_64-linux-gnu/' \
-	| sed 's/i386/amd64/' \
-	| sed 's/\/stubs-32.ph$/\/stubs-64.ph/';
-} | sort > tar2.txt
-{ < tar1.txt \
-	grep -v '^\./usr/bin/i386$' \
-	| grep -v '^\./usr/bin/x86_64$' \
-	| grep -v '^\./usr/lib32/$' \
-	| grep -v '^\./lib32$' \
-	| grep -v '^\./lib64$' \
-	| grep -v '^\./usr/lib64/$' \
-	| grep -v '^\./usr/lib64/ld-linux-x86-64\.so\.2$' \
-	| grep -v '^\./usr/lib/gcc/x86_64-linux-gnu/$' \
-	| grep -v '^\./usr/lib/gcc/x86_64-linux-gnu/[0-9]\+/$' \
-	| grep -v '^\./usr/lib/x86_64-linux-gnu/ld-linux-x86-64\.so\.2$' \
-	| grep -v '^\./usr/lib/x86_64-linux-gnu/libmvec\.so\.1$' \
-	| grep -v '^\./usr/share/doc/[^/]\+/changelog\(\.Debian\)\?\.amd64\.gz$' \
-	| grep -v '^\./usr/share/man/man8/i386\.8\.gz$' \
-	| grep -v '^\./usr/share/man/man8/x86_64\.8\.gz$';
+{
+  tar -tf /tmp/debian-chroot.tar \
+    | grep -v '^\./usr/bin/i386$' \
+    | grep -v '^\./usr/lib/ld-linux\.so\.2$' \
+    | grep -v '^\./usr/lib/i386-linux-gnu/ld-linux\.so\.2$' \
+    | grep -v '^\./usr/lib/gcc/i686-linux-gnu/$' \
+    | grep -v '^\./usr/lib/gcc/i686-linux-gnu/[0-9]\+/$' \
+    | grep -v '^\./usr/share/man/man8/i386\.8\.gz$' \
+    | grep -v '^\./usr/share/doc/[^/]\+/changelog\(\.Debian\)\?\.i386\.gz$' \
+    | sed 's/i386-linux-gnu/x86_64-linux-gnu/' \
+    | sed 's/i386/amd64/' \
+    | sed 's/\/stubs-32.ph$/\/stubs-64.ph/'
+} | sort >tar2.txt
+{
+  grep <tar1.txt -v '^\./usr/bin/i386$' \
+    | grep -v '^\./usr/bin/x86_64$' \
+    | grep -v '^\./usr/lib32/$' \
+    | grep -v '^\./lib32$' \
+    | grep -v '^\./lib64$' \
+    | grep -v '^\./usr/lib64/$' \
+    | grep -v '^\./usr/lib64/ld-linux-x86-64\.so\.2$' \
+    | grep -v '^\./usr/lib/gcc/x86_64-linux-gnu/$' \
+    | grep -v '^\./usr/lib/gcc/x86_64-linux-gnu/[0-9]\+/$' \
+    | grep -v '^\./usr/lib/x86_64-linux-gnu/ld-linux-x86-64\.so\.2$' \
+    | grep -v '^\./usr/lib/x86_64-linux-gnu/libmvec\.so\.1$' \
+    | grep -v '^\./usr/share/doc/[^/]\+/changelog\(\.Debian\)\?\.amd64\.gz$' \
+    | grep -v '^\./usr/share/man/man8/i386\.8\.gz$' \
+    | grep -v '^\./usr/share/man/man8/x86_64\.8\.gz$'
 } | sort | diff -u - tar2.txt >&2
 rm /tmp/debian-chroot.tar

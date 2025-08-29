@@ -23,7 +23,7 @@
 use strict;
 use warnings;
 
-our $VERSION = '1.4.0';
+our $VERSION = '1.5.7';
 
 use English;
 use Getopt::Long;
@@ -36,16 +36,19 @@ use File::Find;
 use Cwd qw(abs_path getcwd);
 require "syscall.ph";      ## no critic (Modules::RequireBarewordIncludes)
 require "sys/ioctl.ph";    ## no critic (Modules::RequireBarewordIncludes)
-use Fcntl      qw(S_IFCHR S_IFBLK FD_CLOEXEC F_GETFD F_SETFD);
+use Fcntl
+  qw(S_IFCHR S_IFBLK FD_CLOEXEC F_GETFD F_SETFD LOCK_EX O_RDONLY O_DIRECTORY);
 use List::Util qw(any none);
 use POSIX
-  qw(SIGINT SIGHUP SIGPIPE SIGTERM SIG_BLOCK SIG_UNBLOCK strftime isatty);
+  qw(SIGINT SIGHUP SIGPIPE SIGTERM SIG_BLOCK SIG_UNBLOCK strftime isatty
+  WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG);
 use Carp;
 use Term::ANSIColor;
 use Socket;
 use Time::HiRes;
 use Math::BigInt;
 use Text::ParseWords;
+use Digest::SHA;
 use version;
 
 ## no critic (InputOutput::RequireBriefOpen)
@@ -66,13 +69,16 @@ use version;
 *MS_BIND    = \0x1000;
 *MS_REC     = \0x4000;
 *MNT_DETACH = \2;
+# uuid_t NameSpace_DNS in rfc4122
+*UUID_NS_DNS = \'6ba7b810-9dad-11d1-80b4-00c04fd430c8';
 our (
     $CLONE_NEWNS,                 $CLONE_NEWUTS,
     $CLONE_NEWIPC,                $CLONE_NEWUSER,
     $CLONE_NEWPID,                $CLONE_NEWNET,
     $_LINUX_CAPABILITY_VERSION_3, $CAP_SYS_ADMIN,
     $PR_CAPBSET_READ,             $MS_BIND,
-    $MS_REC,                      $MNT_DETACH
+    $MS_REC,                      $MNT_DETACH,
+    $UUID_NS_DNS
 );
 
 #<<<
@@ -83,23 +89,1029 @@ our (
 #   3 -> character special
 #   4 -> block special
 #   5 -> directory
-my @devfiles = (
-    # filename  mode      type link target        major  minor
-    ["",        oct(755), 5,   '',                undef, undef],
-    ["console", oct(666), 3,   '',                5,     1],
-    ["fd",      oct(777), 2,   '/proc/self/fd',   undef, undef],
-    ["full",    oct(666), 3,   '',                1,     7],
-    ["null",    oct(666), 3,   '',                1,     3],
-    ["ptmx",    oct(666), 3,   '',                5,     2],
-    ["pts/",    oct(755), 5,   '',                undef, undef],
-    ["random",  oct(666), 3,   '',                1,     8],
-    ["shm/",    oct(755), 5,   '',                undef, undef],
-    ["stderr",  oct(777), 2,   '/proc/self/fd/2', undef, undef],
-    ["stdin",   oct(777), 2,   '/proc/self/fd/0', undef, undef],
-    ["stdout",  oct(777), 2,   '/proc/self/fd/1', undef, undef],
-    ["tty",     oct(666), 3,   '',                5,     0],
-    ["urandom", oct(666), 3,   '',                1,     9],
-    ["zero",    oct(666), 3,   '',                1,     5],
+my @linuxdevfiles = (
+    # file name       mode      type   link target        major  minor  transl.
+    ["./dev/",        oct(755), '5',   undef,             undef, undef, undef],
+    ["./dev/console", oct(666), '3',   undef,             5,     1,     undef],
+    ["./dev/fd",      oct(777), '2',   '/proc/self/fd',   undef, undef, undef],
+    ["./dev/full",    oct(666), '3',   undef,             1,     7,     undef],
+    ["./dev/null",    oct(666), '3',   undef,             1,     3,     undef],
+    ["./dev/ptmx",    oct(666), '3',   undef,             5,     2,     undef],
+    ["./dev/pts/",    oct(755), '5',   undef,             undef, undef, undef],
+    ["./dev/random",  oct(666), '3',   undef,             1,     8,     undef],
+    ["./dev/shm/",    oct(755), '5',   undef,             undef, undef, undef],
+    ["./dev/stderr",  oct(777), '2',   '/proc/self/fd/2', undef, undef, undef],
+    ["./dev/stdin",   oct(777), '2',   '/proc/self/fd/0', undef, undef, undef],
+    ["./dev/stdout",  oct(777), '2',   '/proc/self/fd/1', undef, undef, undef],
+    ["./dev/tty",     oct(666), '3',   undef,             5,     0,     undef],
+    ["./dev/urandom", oct(666), '3',   undef,             1,     9,     undef],
+    ["./dev/zero",    oct(666), '3',   undef,             1,     5,     undef],
+);
+
+my @hurdfiles = (
+# file name           mode      type   link target      major  minor  transl.
+['./dev/',            oct(755), '5',   undef,           undef, undef, undef],
+['./dev/MAKEDEV',     oct(755), '2',   '/sbin/MAKEDEV', undef, undef, undef],
+['./dev/cd0',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:cd0\0"],
+['./dev/cd1',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:cd1\0"],
+['./dev/com0',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/com0\0device\0com0\0"],
+['./dev/com1',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/com1\0device\0com1\0"],
+['./dev/com2',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/com2\0device\0com2\0"],
+['./dev/com3',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/com3\0device\0com3\0"],
+['./dev/cons',        oct(600), '0',   undef,           undef, undef, undef],
+['./dev/console',     oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/console\0device\0console\0"],
+['./dev/disk',        oct(755), '2',   'rumpdisk',      undef, undef, undef],
+['./dev/eth0',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/devnode\0-M\0/dev/net\0eth0\0"],
+['./dev/eth1',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/devnode\0-M\0/dev/net\0eth1\0"],
+['./dev/eth2',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/devnode\0-M\0/dev/net\0eth2\0"],
+['./dev/eth3',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/devnode\0-M\0/dev/net\0eth3\0"],
+['./dev/fd',          oct(666), '0',   undef,           undef, undef,
+                  "/hurd/magic\0--directory\0fd\0"],
+['./dev/fd0',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0fd0\0"],
+['./dev/fd1',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0fd1\0"],
+['./dev/full',        oct(666), '0',   undef,           undef, undef,
+                  "/hurd/null\0--full\0"],
+['./dev/hd0',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0\0"],
+['./dev/hd0s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s1\0"],
+['./dev/hd0s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s10\0"],
+['./dev/hd0s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s11\0"],
+['./dev/hd0s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s12\0"],
+['./dev/hd0s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s13\0"],
+['./dev/hd0s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s14\0"],
+['./dev/hd0s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s15\0"],
+['./dev/hd0s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s16\0"],
+['./dev/hd0s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s2\0"],
+['./dev/hd0s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s3\0"],
+['./dev/hd0s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s4\0"],
+['./dev/hd0s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s5\0"],
+['./dev/hd0s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s6\0"],
+['./dev/hd0s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s7\0"],
+['./dev/hd0s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s8\0"],
+['./dev/hd0s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd0s9\0"],
+['./dev/hd1',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1\0"],
+['./dev/hd1s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s1\0"],
+['./dev/hd1s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s10\0"],
+['./dev/hd1s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s11\0"],
+['./dev/hd1s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s12\0"],
+['./dev/hd1s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s13\0"],
+['./dev/hd1s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s14\0"],
+['./dev/hd1s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s15\0"],
+['./dev/hd1s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s16\0"],
+['./dev/hd1s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s2\0"],
+['./dev/hd1s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s3\0"],
+['./dev/hd1s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s4\0"],
+['./dev/hd1s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s5\0"],
+['./dev/hd1s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s6\0"],
+['./dev/hd1s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s7\0"],
+['./dev/hd1s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s8\0"],
+['./dev/hd1s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd1s9\0"],
+['./dev/hd2',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2\0"],
+['./dev/hd2s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s1\0"],
+['./dev/hd2s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s10\0"],
+['./dev/hd2s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s11\0"],
+['./dev/hd2s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s12\0"],
+['./dev/hd2s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s13\0"],
+['./dev/hd2s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s14\0"],
+['./dev/hd2s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s15\0"],
+['./dev/hd2s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s16\0"],
+['./dev/hd2s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s2\0"],
+['./dev/hd2s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s3\0"],
+['./dev/hd2s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s4\0"],
+['./dev/hd2s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s5\0"],
+['./dev/hd2s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s6\0"],
+['./dev/hd2s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s7\0"],
+['./dev/hd2s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s8\0"],
+['./dev/hd2s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd2s9\0"],
+['./dev/hd3',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3\0"],
+['./dev/hd3s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s1\0"],
+['./dev/hd3s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s10\0"],
+['./dev/hd3s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s11\0"],
+['./dev/hd3s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s12\0"],
+['./dev/hd3s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s13\0"],
+['./dev/hd3s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s14\0"],
+['./dev/hd3s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s15\0"],
+['./dev/hd3s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s16\0"],
+['./dev/hd3s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s2\0"],
+['./dev/hd3s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s3\0"],
+['./dev/hd3s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s4\0"],
+['./dev/hd3s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s5\0"],
+['./dev/hd3s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s6\0"],
+['./dev/hd3s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s7\0"],
+['./dev/hd3s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s8\0"],
+['./dev/hd3s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd3s9\0"],
+['./dev/hd4',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4\0"],
+['./dev/hd4s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s1\0"],
+['./dev/hd4s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s10\0"],
+['./dev/hd4s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s11\0"],
+['./dev/hd4s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s12\0"],
+['./dev/hd4s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s13\0"],
+['./dev/hd4s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s14\0"],
+['./dev/hd4s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s15\0"],
+['./dev/hd4s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s16\0"],
+['./dev/hd4s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s2\0"],
+['./dev/hd4s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s3\0"],
+['./dev/hd4s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s4\0"],
+['./dev/hd4s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s5\0"],
+['./dev/hd4s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s6\0"],
+['./dev/hd4s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s7\0"],
+['./dev/hd4s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s8\0"],
+['./dev/hd4s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd4s9\0"],
+['./dev/hd5',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5\0"],
+['./dev/hd5s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s1\0"],
+['./dev/hd5s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s10\0"],
+['./dev/hd5s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s11\0"],
+['./dev/hd5s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s12\0"],
+['./dev/hd5s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s13\0"],
+['./dev/hd5s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s14\0"],
+['./dev/hd5s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s15\0"],
+['./dev/hd5s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s16\0"],
+['./dev/hd5s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s2\0"],
+['./dev/hd5s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s3\0"],
+['./dev/hd5s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s4\0"],
+['./dev/hd5s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s5\0"],
+['./dev/hd5s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s6\0"],
+['./dev/hd5s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s7\0"],
+['./dev/hd5s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s8\0"],
+['./dev/hd5s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0hd5s9\0"],
+['./dev/kbd',         oct(644), '2',   'cons/kbd',      undef, undef, undef],
+['./dev/klog',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/streamio\0kmsg\0"],
+['./dev/loop0',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/loop1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/loop2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/loop3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/loop4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/loop5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/loop6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/loop7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/lpr0',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/streamio\0lpr0\0"],
+['./dev/lpr1',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/streamio\0lpr1\0"],
+['./dev/lpr2',        oct(660), '0',   undef,           undef, undef,
+                  "/hurd/streamio\0lpr2\0"],
+['./dev/mem',         oct(660), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0--no-cache\0mem\0"],
+['./dev/mouse',       oct(644), '2',   'cons/mouse',    undef, undef, undef],
+['./dev/net',         oct(755), '2',   'netdde',        undef, undef, undef],
+['./dev/netdde',      oct(660), '0',   undef,           undef, undef,
+                  "/hurd/netdde\0"],
+['./dev/null',        oct(666), '0',   undef,           undef, undef,
+                  "/hurd/null\0"],
+['./dev/pseudo-root', oct(640), '4',   undef,           0,     0,
+                  "/hurd/storeio\0pseudo-root\0"],
+['./dev/ptyp0',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp0\0pty-master\0/dev/ttyp0\0"],
+['./dev/ptyp1',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp1\0pty-master\0/dev/ttyp1\0"],
+['./dev/ptyp2',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp2\0pty-master\0/dev/ttyp2\0"],
+['./dev/ptyp3',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp3\0pty-master\0/dev/ttyp3\0"],
+['./dev/ptyp4',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp4\0pty-master\0/dev/ttyp4\0"],
+['./dev/ptyp5',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp5\0pty-master\0/dev/ttyp5\0"],
+['./dev/ptyp6',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp6\0pty-master\0/dev/ttyp6\0"],
+['./dev/ptyp7',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp7\0pty-master\0/dev/ttyp7\0"],
+['./dev/ptyp8',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp8\0pty-master\0/dev/ttyp8\0"],
+['./dev/ptyp9',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyp9\0pty-master\0/dev/ttyp9\0"],
+['./dev/ptypa',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypa\0pty-master\0/dev/ttypa\0"],
+['./dev/ptypb',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypb\0pty-master\0/dev/ttypb\0"],
+['./dev/ptypc',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypc\0pty-master\0/dev/ttypc\0"],
+['./dev/ptypd',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypd\0pty-master\0/dev/ttypd\0"],
+['./dev/ptype',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptype\0pty-master\0/dev/ttype\0"],
+['./dev/ptypf',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypf\0pty-master\0/dev/ttypf\0"],
+['./dev/ptypg',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypg\0pty-master\0/dev/ttypg\0"],
+['./dev/ptyph',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyph\0pty-master\0/dev/ttyph\0"],
+['./dev/ptypi',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypi\0pty-master\0/dev/ttypi\0"],
+['./dev/ptypj',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypj\0pty-master\0/dev/ttypj\0"],
+['./dev/ptypk',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypk\0pty-master\0/dev/ttypk\0"],
+['./dev/ptypl',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypl\0pty-master\0/dev/ttypl\0"],
+['./dev/ptypm',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypm\0pty-master\0/dev/ttypm\0"],
+['./dev/ptypn',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypn\0pty-master\0/dev/ttypn\0"],
+['./dev/ptypo',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypo\0pty-master\0/dev/ttypo\0"],
+['./dev/ptypp',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypp\0pty-master\0/dev/ttypp\0"],
+['./dev/ptypq',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypq\0pty-master\0/dev/ttypq\0"],
+['./dev/ptypr',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypr\0pty-master\0/dev/ttypr\0"],
+['./dev/ptyps',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyps\0pty-master\0/dev/ttyps\0"],
+['./dev/ptypt',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypt\0pty-master\0/dev/ttypt\0"],
+['./dev/ptypu',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypu\0pty-master\0/dev/ttypu\0"],
+['./dev/ptypv',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptypv\0pty-master\0/dev/ttypv\0"],
+['./dev/ptyq0',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq0\0pty-master\0/dev/ttyq0\0"],
+['./dev/ptyq1',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq1\0pty-master\0/dev/ttyq1\0"],
+['./dev/ptyq2',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq2\0pty-master\0/dev/ttyq2\0"],
+['./dev/ptyq3',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq3\0pty-master\0/dev/ttyq3\0"],
+['./dev/ptyq4',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq4\0pty-master\0/dev/ttyq4\0"],
+['./dev/ptyq5',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq5\0pty-master\0/dev/ttyq5\0"],
+['./dev/ptyq6',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq6\0pty-master\0/dev/ttyq6\0"],
+['./dev/ptyq7',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq7\0pty-master\0/dev/ttyq7\0"],
+['./dev/ptyq8',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq8\0pty-master\0/dev/ttyq8\0"],
+['./dev/ptyq9',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyq9\0pty-master\0/dev/ttyq9\0"],
+['./dev/ptyqa',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqa\0pty-master\0/dev/ttyqa\0"],
+['./dev/ptyqb',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqb\0pty-master\0/dev/ttyqb\0"],
+['./dev/ptyqc',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqc\0pty-master\0/dev/ttyqc\0"],
+['./dev/ptyqd',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqd\0pty-master\0/dev/ttyqd\0"],
+['./dev/ptyqe',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqe\0pty-master\0/dev/ttyqe\0"],
+['./dev/ptyqf',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqf\0pty-master\0/dev/ttyqf\0"],
+['./dev/ptyqg',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqg\0pty-master\0/dev/ttyqg\0"],
+['./dev/ptyqh',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqh\0pty-master\0/dev/ttyqh\0"],
+['./dev/ptyqi',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqi\0pty-master\0/dev/ttyqi\0"],
+['./dev/ptyqj',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqj\0pty-master\0/dev/ttyqj\0"],
+['./dev/ptyqk',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqk\0pty-master\0/dev/ttyqk\0"],
+['./dev/ptyql',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyql\0pty-master\0/dev/ttyql\0"],
+['./dev/ptyqm',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqm\0pty-master\0/dev/ttyqm\0"],
+['./dev/ptyqn',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqn\0pty-master\0/dev/ttyqn\0"],
+['./dev/ptyqo',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqo\0pty-master\0/dev/ttyqo\0"],
+['./dev/ptyqp',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqp\0pty-master\0/dev/ttyqp\0"],
+['./dev/ptyqq',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqq\0pty-master\0/dev/ttyqq\0"],
+['./dev/ptyqr',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqr\0pty-master\0/dev/ttyqr\0"],
+['./dev/ptyqs',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqs\0pty-master\0/dev/ttyqs\0"],
+['./dev/ptyqt',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqt\0pty-master\0/dev/ttyqt\0"],
+['./dev/ptyqu',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqu\0pty-master\0/dev/ttyqu\0"],
+['./dev/ptyqv',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ptyqv\0pty-master\0/dev/ttyqv\0"],
+['./dev/random',      oct(644), '0',   undef,           undef, undef,
+                  "/hurd/random\0--seed-file\0/var/lib/random-seed\0"],
+['./dev/rumpdisk',    oct(660), '0',   undef,           undef, undef,
+                  "/hurd/rumpdisk\0"],
+['./dev/sd0',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0\0"],
+['./dev/sd0s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s1\0"],
+['./dev/sd0s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s10\0"],
+['./dev/sd0s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s11\0"],
+['./dev/sd0s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s12\0"],
+['./dev/sd0s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s13\0"],
+['./dev/sd0s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s14\0"],
+['./dev/sd0s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s15\0"],
+['./dev/sd0s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s16\0"],
+['./dev/sd0s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s2\0"],
+['./dev/sd0s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s3\0"],
+['./dev/sd0s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s4\0"],
+['./dev/sd0s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s5\0"],
+['./dev/sd0s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s6\0"],
+['./dev/sd0s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s7\0"],
+['./dev/sd0s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s8\0"],
+['./dev/sd0s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd0s9\0"],
+['./dev/sd1',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1\0"],
+['./dev/sd1s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s1\0"],
+['./dev/sd1s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s10\0"],
+['./dev/sd1s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s11\0"],
+['./dev/sd1s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s12\0"],
+['./dev/sd1s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s13\0"],
+['./dev/sd1s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s14\0"],
+['./dev/sd1s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s15\0"],
+['./dev/sd1s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s16\0"],
+['./dev/sd1s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s2\0"],
+['./dev/sd1s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s3\0"],
+['./dev/sd1s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s4\0"],
+['./dev/sd1s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s5\0"],
+['./dev/sd1s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s6\0"],
+['./dev/sd1s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s7\0"],
+['./dev/sd1s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s8\0"],
+['./dev/sd1s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd1s9\0"],
+['./dev/sd2',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2\0"],
+['./dev/sd2s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s1\0"],
+['./dev/sd2s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s10\0"],
+['./dev/sd2s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s11\0"],
+['./dev/sd2s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s12\0"],
+['./dev/sd2s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s13\0"],
+['./dev/sd2s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s14\0"],
+['./dev/sd2s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s15\0"],
+['./dev/sd2s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s16\0"],
+['./dev/sd2s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s2\0"],
+['./dev/sd2s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s3\0"],
+['./dev/sd2s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s4\0"],
+['./dev/sd2s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s5\0"],
+['./dev/sd2s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s6\0"],
+['./dev/sd2s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s7\0"],
+['./dev/sd2s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s8\0"],
+['./dev/sd2s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd2s9\0"],
+['./dev/sd3',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3\0"],
+['./dev/sd3s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s1\0"],
+['./dev/sd3s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s10\0"],
+['./dev/sd3s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s11\0"],
+['./dev/sd3s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s12\0"],
+['./dev/sd3s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s13\0"],
+['./dev/sd3s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s14\0"],
+['./dev/sd3s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s15\0"],
+['./dev/sd3s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s16\0"],
+['./dev/sd3s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s2\0"],
+['./dev/sd3s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s3\0"],
+['./dev/sd3s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s4\0"],
+['./dev/sd3s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s5\0"],
+['./dev/sd3s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s6\0"],
+['./dev/sd3s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s7\0"],
+['./dev/sd3s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s8\0"],
+['./dev/sd3s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd3s9\0"],
+['./dev/sd4',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4\0"],
+['./dev/sd4s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s1\0"],
+['./dev/sd4s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s10\0"],
+['./dev/sd4s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s11\0"],
+['./dev/sd4s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s12\0"],
+['./dev/sd4s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s13\0"],
+['./dev/sd4s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s14\0"],
+['./dev/sd4s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s15\0"],
+['./dev/sd4s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s16\0"],
+['./dev/sd4s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s2\0"],
+['./dev/sd4s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s3\0"],
+['./dev/sd4s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s4\0"],
+['./dev/sd4s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s5\0"],
+['./dev/sd4s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s6\0"],
+['./dev/sd4s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s7\0"],
+['./dev/sd4s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s8\0"],
+['./dev/sd4s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd4s9\0"],
+['./dev/sd5',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5\0"],
+['./dev/sd5s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s1\0"],
+['./dev/sd5s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s10\0"],
+['./dev/sd5s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s11\0"],
+['./dev/sd5s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s12\0"],
+['./dev/sd5s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s13\0"],
+['./dev/sd5s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s14\0"],
+['./dev/sd5s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s15\0"],
+['./dev/sd5s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s16\0"],
+['./dev/sd5s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s2\0"],
+['./dev/sd5s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s3\0"],
+['./dev/sd5s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s4\0"],
+['./dev/sd5s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s5\0"],
+['./dev/sd5s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s6\0"],
+['./dev/sd5s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s7\0"],
+['./dev/sd5s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s8\0"],
+['./dev/sd5s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0sd5s9\0"],
+['./dev/shm',         oct(644), '2',   '/tmp',          undef, undef, undef],
+['./dev/stderr',      oct(755), '2',   'fd/2',          undef, undef, undef],
+['./dev/stdin',       oct(755), '2',   'fd/0',          undef, undef, undef],
+['./dev/stdout',      oct(755), '2',   'fd/1',          undef, undef, undef],
+['./dev/time',        oct(644), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0--no-cache\0time\0"],
+['./dev/tty',         oct(666), '0',   undef,           undef, undef,
+                  "/hurd/magic\0tty\0"],
+['./dev/tty1',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/tty1\0hurdio\0/dev/vcs/1/console\0"],
+['./dev/tty2',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/tty2\0hurdio\0/dev/vcs/2/console\0"],
+['./dev/tty3',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/tty3\0hurdio\0/dev/vcs/3/console\0"],
+['./dev/tty4',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/tty4\0hurdio\0/dev/vcs/4/console\0"],
+['./dev/tty5',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/tty5\0hurdio\0/dev/vcs/5/console\0"],
+['./dev/tty6',        oct(600), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/tty6\0hurdio\0/dev/vcs/6/console\0"],
+['./dev/ttyp0',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp0\0pty-slave\0/dev/ptyp0\0"],
+['./dev/ttyp1',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp1\0pty-slave\0/dev/ptyp1\0"],
+['./dev/ttyp2',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp2\0pty-slave\0/dev/ptyp2\0"],
+['./dev/ttyp3',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp3\0pty-slave\0/dev/ptyp3\0"],
+['./dev/ttyp4',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp4\0pty-slave\0/dev/ptyp4\0"],
+['./dev/ttyp5',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp5\0pty-slave\0/dev/ptyp5\0"],
+['./dev/ttyp6',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp6\0pty-slave\0/dev/ptyp6\0"],
+['./dev/ttyp7',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp7\0pty-slave\0/dev/ptyp7\0"],
+['./dev/ttyp8',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp8\0pty-slave\0/dev/ptyp8\0"],
+['./dev/ttyp9',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyp9\0pty-slave\0/dev/ptyp9\0"],
+['./dev/ttypa',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypa\0pty-slave\0/dev/ptypa\0"],
+['./dev/ttypb',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypb\0pty-slave\0/dev/ptypb\0"],
+['./dev/ttypc',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypc\0pty-slave\0/dev/ptypc\0"],
+['./dev/ttypd',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypd\0pty-slave\0/dev/ptypd\0"],
+['./dev/ttype',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttype\0pty-slave\0/dev/ptype\0"],
+['./dev/ttypf',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypf\0pty-slave\0/dev/ptypf\0"],
+['./dev/ttypg',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypg\0pty-slave\0/dev/ptypg\0"],
+['./dev/ttyph',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyph\0pty-slave\0/dev/ptyph\0"],
+['./dev/ttypi',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypi\0pty-slave\0/dev/ptypi\0"],
+['./dev/ttypj',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypj\0pty-slave\0/dev/ptypj\0"],
+['./dev/ttypk',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypk\0pty-slave\0/dev/ptypk\0"],
+['./dev/ttypl',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypl\0pty-slave\0/dev/ptypl\0"],
+['./dev/ttypm',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypm\0pty-slave\0/dev/ptypm\0"],
+['./dev/ttypn',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypn\0pty-slave\0/dev/ptypn\0"],
+['./dev/ttypo',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypo\0pty-slave\0/dev/ptypo\0"],
+['./dev/ttypp',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypp\0pty-slave\0/dev/ptypp\0"],
+['./dev/ttypq',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypq\0pty-slave\0/dev/ptypq\0"],
+['./dev/ttypr',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypr\0pty-slave\0/dev/ptypr\0"],
+['./dev/ttyps',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyps\0pty-slave\0/dev/ptyps\0"],
+['./dev/ttypt',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypt\0pty-slave\0/dev/ptypt\0"],
+['./dev/ttypu',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypu\0pty-slave\0/dev/ptypu\0"],
+['./dev/ttypv',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttypv\0pty-slave\0/dev/ptypv\0"],
+['./dev/ttyq0',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq0\0pty-slave\0/dev/ptyq0\0"],
+['./dev/ttyq1',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq1\0pty-slave\0/dev/ptyq1\0"],
+['./dev/ttyq2',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq2\0pty-slave\0/dev/ptyq2\0"],
+['./dev/ttyq3',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq3\0pty-slave\0/dev/ptyq3\0"],
+['./dev/ttyq4',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq4\0pty-slave\0/dev/ptyq4\0"],
+['./dev/ttyq5',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq5\0pty-slave\0/dev/ptyq5\0"],
+['./dev/ttyq6',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq6\0pty-slave\0/dev/ptyq6\0"],
+['./dev/ttyq7',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq7\0pty-slave\0/dev/ptyq7\0"],
+['./dev/ttyq8',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq8\0pty-slave\0/dev/ptyq8\0"],
+['./dev/ttyq9',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyq9\0pty-slave\0/dev/ptyq9\0"],
+['./dev/ttyqa',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqa\0pty-slave\0/dev/ptyqa\0"],
+['./dev/ttyqb',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqb\0pty-slave\0/dev/ptyqb\0"],
+['./dev/ttyqc',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqc\0pty-slave\0/dev/ptyqc\0"],
+['./dev/ttyqd',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqd\0pty-slave\0/dev/ptyqd\0"],
+['./dev/ttyqe',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqe\0pty-slave\0/dev/ptyqe\0"],
+['./dev/ttyqf',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqf\0pty-slave\0/dev/ptyqf\0"],
+['./dev/ttyqg',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqg\0pty-slave\0/dev/ptyqg\0"],
+['./dev/ttyqh',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqh\0pty-slave\0/dev/ptyqh\0"],
+['./dev/ttyqi',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqi\0pty-slave\0/dev/ptyqi\0"],
+['./dev/ttyqj',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqj\0pty-slave\0/dev/ptyqj\0"],
+['./dev/ttyqk',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqk\0pty-slave\0/dev/ptyqk\0"],
+['./dev/ttyql',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyql\0pty-slave\0/dev/ptyql\0"],
+['./dev/ttyqm',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqm\0pty-slave\0/dev/ptyqm\0"],
+['./dev/ttyqn',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqn\0pty-slave\0/dev/ptyqn\0"],
+['./dev/ttyqo',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqo\0pty-slave\0/dev/ptyqo\0"],
+['./dev/ttyqp',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqp\0pty-slave\0/dev/ptyqp\0"],
+['./dev/ttyqq',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqq\0pty-slave\0/dev/ptyqq\0"],
+['./dev/ttyqr',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqr\0pty-slave\0/dev/ptyqr\0"],
+['./dev/ttyqs',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqs\0pty-slave\0/dev/ptyqs\0"],
+['./dev/ttyqt',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqt\0pty-slave\0/dev/ptyqt\0"],
+['./dev/ttyqu',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqu\0pty-slave\0/dev/ptyqu\0"],
+['./dev/ttyqv',       oct(666), '0',   undef,           undef, undef,
+                  "/hurd/term\0/dev/ttyqv\0pty-slave\0/dev/ptyqv\0"],
+['./dev/urandom',     oct(755), '2',   'random',        undef, undef,
+                  "/hurd/random\0--seed-file\0/var/lib/random-seed\0--fast\0"],
+['./dev/vcs',         oct(600), '0',   undef,           undef, undef,
+                  "/hurd/console\0"],
+['./dev/wd0',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:wd0\0"],
+['./dev/wd0s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:1:device:@/dev/disk:wd0\0"],
+['./dev/wd0s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:10:device:@/dev/disk:wd0\0"],
+['./dev/wd0s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:11:device:@/dev/disk:wd0\0"],
+['./dev/wd0s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:12:device:@/dev/disk:wd0\0"],
+['./dev/wd0s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:13:device:@/dev/disk:wd0\0"],
+['./dev/wd0s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:14:device:@/dev/disk:wd0\0"],
+['./dev/wd0s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:15:device:@/dev/disk:wd0\0"],
+['./dev/wd0s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:16:device:@/dev/disk:wd0\0"],
+['./dev/wd0s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:2:device:@/dev/disk:wd0\0"],
+['./dev/wd0s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:3:device:@/dev/disk:wd0\0"],
+['./dev/wd0s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:4:device:@/dev/disk:wd0\0"],
+['./dev/wd0s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:5:device:@/dev/disk:wd0\0"],
+['./dev/wd0s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:6:device:@/dev/disk:wd0\0"],
+['./dev/wd0s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:7:device:@/dev/disk:wd0\0"],
+['./dev/wd0s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:8:device:@/dev/disk:wd0\0"],
+['./dev/wd0s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:9:device:@/dev/disk:wd0\0"],
+['./dev/wd1',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:wd1\0"],
+['./dev/wd1s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:1:device:@/dev/disk:wd1\0"],
+['./dev/wd1s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:10:device:@/dev/disk:wd1\0"],
+['./dev/wd1s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:11:device:@/dev/disk:wd1\0"],
+['./dev/wd1s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:12:device:@/dev/disk:wd1\0"],
+['./dev/wd1s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:13:device:@/dev/disk:wd1\0"],
+['./dev/wd1s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:14:device:@/dev/disk:wd1\0"],
+['./dev/wd1s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:15:device:@/dev/disk:wd1\0"],
+['./dev/wd1s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:16:device:@/dev/disk:wd1\0"],
+['./dev/wd1s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:2:device:@/dev/disk:wd1\0"],
+['./dev/wd1s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:3:device:@/dev/disk:wd1\0"],
+['./dev/wd1s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:4:device:@/dev/disk:wd1\0"],
+['./dev/wd1s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:5:device:@/dev/disk:wd1\0"],
+['./dev/wd1s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:6:device:@/dev/disk:wd1\0"],
+['./dev/wd1s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:7:device:@/dev/disk:wd1\0"],
+['./dev/wd1s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:8:device:@/dev/disk:wd1\0"],
+['./dev/wd1s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:9:device:@/dev/disk:wd1\0"],
+['./dev/wd2',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:wd2\0"],
+['./dev/wd2s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:1:device:@/dev/disk:wd2\0"],
+['./dev/wd2s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:10:device:@/dev/disk:wd2\0"],
+['./dev/wd2s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:11:device:@/dev/disk:wd2\0"],
+['./dev/wd2s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:12:device:@/dev/disk:wd2\0"],
+['./dev/wd2s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:13:device:@/dev/disk:wd2\0"],
+['./dev/wd2s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:14:device:@/dev/disk:wd2\0"],
+['./dev/wd2s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:15:device:@/dev/disk:wd2\0"],
+['./dev/wd2s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:16:device:@/dev/disk:wd2\0"],
+['./dev/wd2s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:2:device:@/dev/disk:wd2\0"],
+['./dev/wd2s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:3:device:@/dev/disk:wd2\0"],
+['./dev/wd2s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:4:device:@/dev/disk:wd2\0"],
+['./dev/wd2s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:5:device:@/dev/disk:wd2\0"],
+['./dev/wd2s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:6:device:@/dev/disk:wd2\0"],
+['./dev/wd2s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:7:device:@/dev/disk:wd2\0"],
+['./dev/wd2s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:8:device:@/dev/disk:wd2\0"],
+['./dev/wd2s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:9:device:@/dev/disk:wd2\0"],
+['./dev/wd3',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:wd3\0"],
+['./dev/wd3s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:1:device:@/dev/disk:wd3\0"],
+['./dev/wd3s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:10:device:@/dev/disk:wd3\0"],
+['./dev/wd3s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:11:device:@/dev/disk:wd3\0"],
+['./dev/wd3s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:12:device:@/dev/disk:wd3\0"],
+['./dev/wd3s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:13:device:@/dev/disk:wd3\0"],
+['./dev/wd3s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:14:device:@/dev/disk:wd3\0"],
+['./dev/wd3s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:15:device:@/dev/disk:wd3\0"],
+['./dev/wd3s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:16:device:@/dev/disk:wd3\0"],
+['./dev/wd3s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:2:device:@/dev/disk:wd3\0"],
+['./dev/wd3s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:3:device:@/dev/disk:wd3\0"],
+['./dev/wd3s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:4:device:@/dev/disk:wd3\0"],
+['./dev/wd3s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:5:device:@/dev/disk:wd3\0"],
+['./dev/wd3s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:6:device:@/dev/disk:wd3\0"],
+['./dev/wd3s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:7:device:@/dev/disk:wd3\0"],
+['./dev/wd3s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:8:device:@/dev/disk:wd3\0"],
+['./dev/wd3s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:9:device:@/dev/disk:wd3\0"],
+['./dev/wd4',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:wd4\0"],
+['./dev/wd4s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:1:device:@/dev/disk:wd4\0"],
+['./dev/wd4s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:10:device:@/dev/disk:wd4\0"],
+['./dev/wd4s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:11:device:@/dev/disk:wd4\0"],
+['./dev/wd4s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:12:device:@/dev/disk:wd4\0"],
+['./dev/wd4s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:13:device:@/dev/disk:wd4\0"],
+['./dev/wd4s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:14:device:@/dev/disk:wd4\0"],
+['./dev/wd4s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:15:device:@/dev/disk:wd4\0"],
+['./dev/wd4s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:16:device:@/dev/disk:wd4\0"],
+['./dev/wd4s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:2:device:@/dev/disk:wd4\0"],
+['./dev/wd4s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:3:device:@/dev/disk:wd4\0"],
+['./dev/wd4s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:4:device:@/dev/disk:wd4\0"],
+['./dev/wd4s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:5:device:@/dev/disk:wd4\0"],
+['./dev/wd4s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:6:device:@/dev/disk:wd4\0"],
+['./dev/wd4s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:7:device:@/dev/disk:wd4\0"],
+['./dev/wd4s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:8:device:@/dev/disk:wd4\0"],
+['./dev/wd4s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:9:device:@/dev/disk:wd4\0"],
+['./dev/wd5',         oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0@/dev/disk:wd5\0"],
+['./dev/wd5s1',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:1:device:@/dev/disk:wd5\0"],
+['./dev/wd5s10',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:10:device:@/dev/disk:wd5\0"],
+['./dev/wd5s11',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:11:device:@/dev/disk:wd5\0"],
+['./dev/wd5s12',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:12:device:@/dev/disk:wd5\0"],
+['./dev/wd5s13',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:13:device:@/dev/disk:wd5\0"],
+['./dev/wd5s14',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:14:device:@/dev/disk:wd5\0"],
+['./dev/wd5s15',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:15:device:@/dev/disk:wd5\0"],
+['./dev/wd5s16',      oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:16:device:@/dev/disk:wd5\0"],
+['./dev/wd5s2',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:2:device:@/dev/disk:wd5\0"],
+['./dev/wd5s3',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:3:device:@/dev/disk:wd5\0"],
+['./dev/wd5s4',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:4:device:@/dev/disk:wd5\0"],
+['./dev/wd5s5',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:5:device:@/dev/disk:wd5\0"],
+['./dev/wd5s6',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:6:device:@/dev/disk:wd5\0"],
+['./dev/wd5s7',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:7:device:@/dev/disk:wd5\0"],
+['./dev/wd5s8',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:8:device:@/dev/disk:wd5\0"],
+['./dev/wd5s9',       oct(640), '0',   undef,           undef, undef,
+                  "/hurd/storeio\0-T\0typed\0part:9:device:@/dev/disk:wd5\0"],
+['./dev/xconsole',    oct(755), '2',   '/run/xconsole', undef, undef, undef],
+['./dev/zero',        oct(666), '0',   undef,           undef, undef,
+                  "/bin/nullauth\0--\0/hurd/storeio\0-Tzero\0"],
+# file name                   mode      type   link tgt   major  minor  transl.
+['./servers/',                oct(755), '5',   undef,     undef, undef, undef],
+['./servers/acpi',            oct(644), '0',   undef,     undef, undef,
+                  "/hurd/acpi\0"],
+['./servers/bus/',            oct(755), '5',   undef,     undef, undef, undef],
+['./servers/bus/pci/',        oct(755), '5',   undef,     undef, undef,
+                  "/hurd/pci-arbiter\0"],
+['./servers/crash',           oct(644), '2',   'crash-dump-core', undef, undef,
+                  undef],
+['./servers/crash-dump-core', oct(644), '0',   undef,     undef, undef,
+                  "/hurd/crash\0--dump-core\0"],
+['./servers/crash-kill',      oct(644), '0',   undef,     undef, undef,
+                  "/hurd/crash\0--kill\0"],
+['./servers/crash-suspend',   oct(644), '0',   undef,     undef, undef,
+                  "/hurd/crash\0--suspend\0"],
+['./servers/default-pager',   oct(755), '0',   undef,     undef, undef,
+                  "/hurd/proxy-defpager\0"],
+['./servers/exec',            oct(644), '0',   undef,     undef, undef,
+                  "/hurd/exec\0"],
+['./servers/password',        oct(644), '0',   undef,     undef, undef,
+                  "/hurd/password\0"],
+['./servers/shutdown',        oct(644), '0',   undef,     undef, undef,
+                  "/hurd/shutdown\0"],
+['./servers/socket/',         oct(755), '5',   undef,     undef, undef, undef],
+['./servers/socket/1',        oct(644), '0',   undef,     undef, undef,
+                  "/hurd/pflocal\0"],
+['./servers/socket/2',        oct(644), '0',   undef,     undef, undef,
+                  "/hurd/pfinet\0-6\0/servers/socket/26\0"],
+['./servers/socket/26',       oct(644), '0',   undef,     undef, undef,
+                  "/hurd/pfinet\0-4\0/servers/socket/2\0"],
+['./servers/socket/inet',     oct(644), '2',   "2",       undef, undef, undef],
+['./servers/socket/inet6',    oct(644), '2',   "26",      undef, undef, undef],
+['./servers/socket/local',    oct(644), '2',   "1",       undef, undef, undef],
+['./servers/startup',         oct(644), '0',   undef,     undef, undef, undef]
 );
 #>>>
 
@@ -215,11 +1227,12 @@ sub minor {
 }
 
 sub can_execute {
-    my $tool = shift;
-    my $pid  = open my $fh, '-|' // return 0;
+    my $tool    = shift;
+    my $verbose = shift // '--version';
+    my $pid     = open my $fh, '-|' // return 0;
     if ($pid == 0) {
         open(STDERR, '>&', STDOUT) or die;
-        exec {$tool} $tool, '--version' or die;
+        exec {$tool} $tool, $verbose or die;
     }
     chomp(
         my $content = do { local $/; <$fh> }
@@ -301,6 +1314,28 @@ sub shellescape {
     # putting them outside of the single-quoted string
     $string =~ s/'/'"'"'/g;
     return "'$string'";
+}
+
+sub create_v5_uuid {
+    use bytes;
+    my $ns_uuid = shift;
+    my $name    = shift;
+    my $version = 0x50;
+    # convert the namespace uuid to binary
+    $ns_uuid =~ tr/-//d;
+    $ns_uuid = pack 'H*', $ns_uuid;
+    # concatenate namespace and name and take sha1
+    my $digest = Digest::SHA->new(1);
+    $digest->add($ns_uuid);
+    $digest->add($name);
+    # only the first 16 bytes matter
+    my $uuid = substr($digest->digest(), 0, 16);
+    # set the version
+    substr $uuid, 6, 1, chr(ord(substr($uuid, 6, 1)) & 0x0f | $version);
+    substr $uuid, 8, 1, chr(ord(substr $uuid, 8, 1) & 0x3f | 0x80);
+    # convert binary back to uuid formatting
+    return join '-', map { unpack 'H*', $_ }
+      map { substr $uuid, 0, $_, '' } (4, 2, 2, 2, 6);
 }
 
 sub test_unshare_userns {
@@ -929,10 +1964,7 @@ sub run_progress {
     }
 
     close($pipe);
-    my $fail = 0;
-    if ($? != 0 or $has_error) {
-        $fail = 1;
-    }
+    my $proc_exit = $?;
 
     waitpid $pid2, 0;
     $? == 0 or error "progress parsing failed";
@@ -943,11 +1975,29 @@ sub run_progress {
 
     # only print failure after progress output finished or otherwise it
     # might interfere with the remaining output
-    if ($fail) {
+    if ($proc_exit != 0 or $has_error) {
         if ($verbosity_level >= 1) {
             print STDERR $output;
         }
-        error((join ' ', $get_exec->('<$fd>')) . ' failed');
+        my $what = '';
+        if ($proc_exit != 0) {
+            if (POSIX::WIFEXITED($proc_exit)) {
+                my $exit = POSIX::WEXITSTATUS($proc_exit);
+                $what
+                  .= "process exited with $exit and error in console output";
+            } elsif (POSIX::WIFSIGNALED($proc_exit)) {
+                my $sig = POSIX::WTERMSIG($proc_exit);
+                $what = "process was killed by signal $sig";
+            } else {
+                $what = "process failed with unknown status code";
+            }
+            if ($has_error) {
+                $what .= " and error in console output";
+            }
+        } else {
+            $what .= "error in console output";
+        }
+        error((join ' ', $get_exec->('<$fd>')) . " failed: $what");
     }
     return;
 }
@@ -1116,6 +2166,8 @@ sub run_apt_download_progress {
                         "-oDebug::NoLocking=1",
                         # no need for pty magic if we write no log
                         "-oDpkg::Use-Pty=0",
+                        # unset this or otherwise "cat >&$fd" will fail
+                        "-oDPkg::Chroot-Directory=",
                     ),
                     @{ $options->{APT_ARGV} },
                 ],
@@ -1148,58 +2200,61 @@ sub setup_mounts {
 
     eval {
         if (any { $_ eq $options->{mode} } ('root', 'unshare')) {
+            0 == system('mount', "--make-rprivate", "/")
+              or warning("mount --make-rprivate / failed: $?");
             # if more than essential should be installed, make the system look
             # more like a real one by creating or bind-mounting the device
             # nodes
-            foreach my $file (@devfiles) {
-                my ($fname, $mode, $type, $linkname, $devmajor, $devminor)
+            foreach my $file (@linuxdevfiles) {
+                my ($fname, $mode, $type, $linkname, $devmajor, $devminor,
+                    undef)
                   = @{$file};
-                next if $fname eq '';
-                if ($type == 0) {    # normal file
+                next if $fname eq './dev/';
+                if ($type eq '0') {    # normal file
                     error "type 0 not implemented";
-                } elsif ($type == 1) {    # hardlink
+                } elsif ($type eq '1') {    # hardlink
                     error "type 1 not implemented";
-                } elsif ($type == 2) {    # symlink
+                } elsif ($type eq '2') {    # symlink
                     if (!$options->{havemknod}) {
                         # If we had mknod, then the symlink was already created
                         # in the run_setup function.
                         if (!-d "$options->{root}/dev") {
                             warning(
-                                "skipping creation of ./dev/$fname because the"
+                                    "skipping creation of $fname because the"
                                   . " /dev directory is missing in the target"
                             );
                             next;
                         }
-                        if (-e "$options->{root}/dev/$fname") {
+                        if (-e "$options->{root}/$fname") {
                             warning(
-                                "skipping creation of ./dev/$fname because it"
+                                    "skipping creation of $fname because it"
                                   . " already exists in the target");
                             next;
                         }
                         push @cleanup_tasks, sub {
-                            unlink "$options->{root}/dev/$fname"
+                            unlink "$options->{root}/$fname"
                               or warning("cannot unlink ./dev/$fname: $!");
                         };
-                        symlink $linkname, "$options->{root}/dev/$fname"
+                        symlink $linkname, "$options->{root}/$fname"
                           or warning
-                          "cannot create symlink ./dev/$fname -> $linkname";
+                          "cannot create symlink $fname -> $linkname";
                     }
-                } elsif ($type == 3 or $type == 4) {
+                } elsif ($type eq '3' or $type eq '4') {
                     # character/block special
                     if (any { $_ =~ '^chroot/mount(?:/dev)?$' }
                         @{ $options->{skip} }) {
                         info "skipping chroot/mount/dev as requested";
                     } elsif (!$options->{canmount}) {
-                        warning "skipping bind-mounting ./dev/$fname";
+                        warning "skipping bind-mounting $fname";
                     } elsif (!$options->{havemknod}) {
                         if (!-d "$options->{root}/dev") {
                             warning(
-                                "skipping creation of ./dev/$fname because the"
+                                    "skipping creation of $fname because the"
                                   . " /dev directory is missing in the target"
                             );
                             next;
                         }
-                        if ($fname eq "ptmx") {
+                        if ($fname eq "./dev/ptmx") {
                             # We must not bind-mount ptmx from the outside or
                             # otherwise posix_openpt() will fail. Instead
                             # /dev/ptmx must refer to /dev/pts/ptmx either by
@@ -1213,21 +2268,20 @@ sub setup_mounts {
                             };
                             next;
                         }
-                        if (!-e "/dev/$fname") {
-                            warning("skipping creation of ./dev/$fname because"
-                                  . " /dev/$fname does not exist"
+                        if (!-e "/$fname") {
+                            warning("skipping creation of $fname because"
+                                  . " $fname does not exist"
                                   . " on the outside");
                             next;
                         }
-                        if (!-c "/dev/$fname") {
-                            warning("skipping creation of ./dev/$fname because"
-                                  . " /dev/$fname on the outside is not a"
+                        if (!-c "/$fname") {
+                            warning("skipping creation of $fname because"
+                                  . " $fname on the outside is not a"
                                   . " character special file");
                             next;
                         }
-                        open my $fh, '>', "$options->{root}/dev/$fname"
-                          or error
-                          "cannot open $options->{root}/dev/$fname: $!";
+                        open my $fh, '>', "$options->{root}/$fname"
+                          or error "cannot open $options->{root}/$fname: $!";
                         close $fh;
                         my @umountopts = ();
                         if ($options->{mode} eq 'unshare') {
@@ -1235,39 +2289,39 @@ sub setup_mounts {
                         }
                         push @cleanup_tasks, sub {
                             0 == system('umount', @umountopts,
-                                "$options->{root}/dev/$fname")
-                              or warning("umount ./dev/$fname failed: $?");
-                            unlink "$options->{root}/dev/$fname"
-                              or warning("cannot unlink ./dev/$fname: $!");
+                                "$options->{root}/$fname")
+                              or warning("umount $fname failed: $?");
+                            unlink "$options->{root}/$fname"
+                              or warning("cannot unlink $fname: $!");
                         };
-                        0 == system('mount', '-o', 'bind', "/dev/$fname",
-                            "$options->{root}/dev/$fname")
-                          or error "mount ./dev/$fname failed: $?";
+                        0 == system('mount', '-o', 'bind', "/$fname",
+                            "$options->{root}/$fname")
+                          or error "mount $fname failed: $?";
                     }
-                } elsif ($type == 5) {
+                } elsif ($type eq '5') {
                     # directory
                     if (any { $_ =~ '^chroot/mount(?:/dev)?$' }
                         @{ $options->{skip} }) {
                         info "skipping chroot/mount/dev as requested";
                     } elsif (!$options->{canmount}) {
-                        warning "skipping bind-mounting ./dev/$fname";
+                        warning "skipping bind-mounting $fname";
                     } else {
                         if (!-d "$options->{root}/dev") {
                             warning(
-                                "skipping creation of ./dev/$fname because the"
+                                    "skipping creation of $fname because the"
                                   . " /dev directory is missing in the target"
                             );
                             next;
                         }
-                        if (!-e "/dev/$fname" && $fname ne "pts/") {
-                            warning("skipping creation of ./dev/$fname because"
-                                  . " /dev/$fname does not exist"
+                        if (!-e "/$fname" && $fname ne "./dev/pts/") {
+                            warning("skipping creation of $fname because"
+                                  . " $fname does not exist"
                                   . " on the outside");
                             next;
                         }
-                        if (!-d "/dev/$fname" && $fname ne "pts/") {
-                            warning("skipping creation of ./dev/$fname because"
-                                  . " /dev/$fname on the outside is not a"
+                        if (!-d "/$fname" && $fname ne "./dev/pts/") {
+                            warning("skipping creation of $fname because"
+                                  . " $fname on the outside is not a"
                                   . " directory");
                             next;
                         }
@@ -1276,18 +2330,17 @@ sub setup_mounts {
                             # into was already created in the run_setup
                             # function.
                             push @cleanup_tasks, sub {
-                                rmdir "$options->{root}/dev/$fname"
-                                  or warning("cannot rmdir ./dev/$fname: $!");
+                                rmdir "$options->{root}/$fname"
+                                  or warning("cannot rmdir $fname: $!");
                             };
-                            if (-e "$options->{root}/dev/$fname") {
-                                if (!-d "$options->{root}/dev/$fname") {
-                                    error
-                                      "./dev/$fname already exists but is not"
+                            if (-e "$options->{root}/$fname") {
+                                if (!-d "$options->{root}/$fname") {
+                                    error "$fname already exists but is not"
                                       . " a directory";
                                 }
                             } else {
                                 my $num_created
-                                  = make_path "$options->{root}/dev/$fname",
+                                  = make_path "$options->{root}/$fname",
                                   { error => \my $err };
                                 if ($err && @$err) {
                                     error(
@@ -1300,11 +2353,11 @@ sub setup_mounts {
                                         ));
                                 } elsif ($num_created == 0) {
                                     error(  "cannot create $options->{root}"
-                                          . "/dev/$fname");
+                                          . "$fname");
                                 }
                             }
-                            chmod $mode, "$options->{root}/dev/$fname"
-                              or error "cannot chmod ./dev/$fname: $!";
+                            chmod $mode, "$options->{root}/$fname"
+                              or error "cannot chmod $fname: $!";
                         }
                         my @umountopts = ();
                         if ($options->{mode} eq 'unshare') {
@@ -1312,10 +2365,10 @@ sub setup_mounts {
                         }
                         push @cleanup_tasks, sub {
                             0 == system('umount', @umountopts,
-                                "$options->{root}/dev/$fname")
-                              or warning("umount ./dev/$fname failed: $?");
+                                "$options->{root}/$fname")
+                              or warning("umount $fname failed: $?");
                         };
-                        if ($fname eq "pts/") {
+                        if ($fname eq "./dev/pts/") {
                             # We cannot just bind-mount /dev/pts from the host
                             # as doing so will make posix_openpt() fail.
                             # Instead, we need to mount a new devpts.
@@ -1337,9 +2390,9 @@ sub setup_mounts {
                                 'noexec,nosuid,uid=5,mode=620,ptmxmode=666'
                             ) or error "mount /dev/pts failed";
                         } else {
-                            0 == system('mount', '-o', 'bind', "/dev/$fname",
-                                "$options->{root}/dev/$fname")
-                              or error "mount ./dev/$fname failed: $?";
+                            0 == system('mount', '-o', 'bind', "/$fname",
+                                "$options->{root}/$fname")
+                              or error "mount $fname failed: $?";
                         }
                     }
                 } else {
@@ -1549,32 +2602,41 @@ sub setup_mounts {
         if (any { $_ eq 'chroot/start-stop-daemon' } @{ $options->{skip} }) {
             info "skipping chroot/start-stop-daemon as requested";
         } else {
+            # $options->{root} must not be part of $ssdloc but must instead be
+            # evaluated at the time the cleanup is run or otherwise, when
+            # performing a pivot-root, the ssd location will still be prefixed
+            # with the chroot path even though we changed root
+            my $ssdloc;
+            if (-f "$options->{root}/sbin/start-stop-daemon") {
+                $ssdloc = "/sbin/start-stop-daemon";
+            } elsif (-f "$options->{root}/usr/sbin/start-stop-daemon") {
+                $ssdloc = "/usr/sbin/start-stop-daemon";
+            }
             push @cleanup_tasks, sub {
-                if (-e "$options->{root}/sbin/start-stop-daemon.REAL") {
+                return unless length $ssdloc;
+                if (-e "$options->{root}/$ssdloc.REAL") {
                     move(
-                        "$options->{root}/sbin/start-stop-daemon.REAL",
-                        "$options->{root}/sbin/start-stop-daemon"
+                        "$options->{root}/$ssdloc.REAL",
+                        "$options->{root}/$ssdloc"
                     ) or error "cannot move start-stop-daemon: $!";
                 }
             };
-            if (-f "$options->{root}/sbin/start-stop-daemon") {
-                if (-e "$options->{root}/sbin/start-stop-daemon.REAL") {
-                    error
-                      "$options->{root}/sbin/start-stop-daemon.REAL already"
-                      . " exists";
+            if (length $ssdloc) {
+                if (-e "$options->{root}/$ssdloc.REAL") {
+                    error "$options->{root}/$ssdloc.REAL already exists";
                 }
                 move(
-                    "$options->{root}/sbin/start-stop-daemon",
-                    "$options->{root}/sbin/start-stop-daemon.REAL"
+                    "$options->{root}/$ssdloc",
+                    "$options->{root}/$ssdloc.REAL"
                 ) or error "cannot move start-stop-daemon: $!";
-                open my $fh, '>', "$options->{root}/sbin/start-stop-daemon"
+                open my $fh, '>', "$options->{root}/$ssdloc"
                   or error "cannot open start-stop-daemon: $!";
                 print $fh "#!/bin/sh\n";
                 print $fh
                   "echo \"Warning: Fake start-stop-daemon called, doing"
                   . " nothing\">&2\n";
                 close $fh;
-                chmod 0755, "$options->{root}/sbin/start-stop-daemon"
+                chmod 0755, "$options->{root}/$ssdloc"
                   or error "cannot chmod start-stop-daemon: $!";
             }
         }
@@ -1824,6 +2886,9 @@ sub setup {
     }
 
     if (-e $options->{apttrusted} && !-r $options->{apttrusted}) {
+        # FIXME: obtain the keyring file with the permissions of the user
+        # outside of the unshared namespace
+        # FIXME: apt no longer sets Dir::Etc::trusted by default
         warning "cannot read $options->{apttrusted}";
     }
     if (-e $options->{apttrustedparts} && !-r $options->{apttrustedparts}) {
@@ -1923,6 +2988,23 @@ sub setup {
 
     my $msg = $@;
 
+    # Wait for (reap) potential zombies and otherwise long-running background
+    # processes or otherwise they might hog resources like /dev/null which can
+    # then not be unmounted resulting in their mountpoints (the regular files)
+    # not being removable and then the removal of device nodes in run_cleanup
+    # (if mmdebstrap is run with --skip=output/dev) will fail.
+    if (any { $_ eq 'zombie-reaping' } @{ $options->{skip} }) {
+        info "skipping zombie-reaping as requested";
+    } else {
+        if (waitpid(-1, POSIX::WNOHANG) >= 0) {
+            info "waiting for background processes to finish...";
+        }
+        while ((my $child = waitpid(-1, 0)) > 0) {
+            my $status = $? >> 8;
+            info "PID $child exited with exit code $status";
+        }
+    }
+
     $cleanup->(0);
     if ($msg) {
         error "setup failed: $msg";
@@ -1951,7 +3033,7 @@ sub run_setup() {
         # since we do not know the dpkg version inside the chroot at this
         # point, we can only omit it in chrootless mode
         if ($options->{mode} ne 'chrootless'
-            or scalar @{ $options->{dpkgopts} } > 0) {
+            or length $options->{dpkgopts} > 0) {
             push @directories, '/etc/dpkg/dpkg.cfg.d/';
         }
         # if dpkg and apt operate from the outside we need some more
@@ -2022,25 +3104,35 @@ sub run_setup() {
         print $conf "Apt::Architectures \"$options->{nativearch}\";\n";
     }
     print $conf "Dir \"$options->{root}\";\n";
+    print $conf "DPkg::Chroot-Directory \"$options->{root}\";\n";
     # not needed anymore for apt 1.3 and newer
     print $conf
       "Dir::State::Status \"$options->{root}/var/lib/dpkg/status\";\n";
     # for authentication, use the keyrings from the host
     print $conf "Dir::Etc::Trusted \"$options->{apttrusted}\";\n";
     print $conf "Dir::Etc::TrustedParts \"$options->{apttrustedparts}\";\n";
-    if ($options->{variant} ne 'apt') {
-        # apt considers itself essential. Thus, when generating an EDSP
-        # document for an external solver, it will add the Essential:yes field
-        # to the apt package stanza. This is unnecessary for any other variant
-        # than 'apt' because in all other variants we compile the set of
-        # packages we consider essential ourselves and for the 'essential'
-        # variant it would even be wrong to add apt. This workaround is only
-        # needed when apt is used with an external solver but doesn't hurt
-        # otherwise and we don't have a good way to figure out whether apt is
-        # using an external solver or not short of parsing the --aptopt
-        # options.
-        print $conf "pkgCacheGen::ForceEssential \",\";\n";
+    # apt considers itself essential. Thus, when generating an EDSP document
+    # for an external solver, it will add the Essential:yes field to the apt
+    # package stanza. This is unnecessary because we compile the set of
+    # packages we consider essential ourselves and for the 'essential' variant
+    # it would even be wrong to add apt. This workaround is only needed when
+    # apt is used with an external solver but doesn't hurt otherwise and we
+    # don't have a good way to figure out whether apt is using an external
+    # solver or not short of parsing the --aptopt options.
+    print $conf "pkgCacheGen::ForceEssential \",\";\n";
+    # Avoid running dpkg-preconfigure. This is not a problem unless in in
+    # chrootless mode, which apt-extracttemplates does not and can not
+    # support because it cannot know that this is a chrootless installation.
+    # We always turn it off for equivalent behavior in all modes. Running
+    # dpkg-preconfigure should not be needed as we also have set
+    # DEBIAN_FRONTEND=noninteractive and DEBCONF_NONINTERACTIVE_SEEN=true and
+    # should thus never see debconf prompts. See #1091442 for details.
+    {
+        open my $tmp, '>', "$options->{root}/etc/apt/apt.conf.d/99debconf"
+          or error "cannot open /etc/apt/apt.conf.d/99debconf: $!";
+        print $tmp "#clear DPkg::Pre-Install-Pkgs;\n";
     }
+
     close $conf;
 
     # We put certain configuration items in their own configuration file
@@ -2069,7 +3161,6 @@ sub run_setup() {
     # We nevertheless always add /var/lib/dpkg/arch to make a chroot built the
     # normal way bit-by-bit identical to a foreign arch chroot built in
     # chrootless mode.
-    chomp(my $hostarch = `dpkg --print-architecture`);
     if ((!-e "$options->{root}/var/lib/dpkg/arch")) {
         open my $fh, '>', "$options->{root}/var/lib/dpkg/arch"
           or error "cannot open /var/lib/dpkg/arch: $!";
@@ -2080,26 +3171,11 @@ sub run_setup() {
         close $fh;
     }
 
-    if (scalar @{ $options->{aptopts} } > 0
+    if (length $options->{aptopts} > 0
         and (!-e "$options->{root}/etc/apt/apt.conf.d/99mmdebstrap")) {
         open my $fh, '>', "$options->{root}/etc/apt/apt.conf.d/99mmdebstrap"
           or error "cannot open /etc/apt/apt.conf.d/99mmdebstrap: $!";
-        foreach my $opt (@{ $options->{aptopts} }) {
-            if (-r $opt) {
-                # flush handle because copy() uses syswrite() which bypasses
-                # buffered IO
-                $fh->flush();
-                copy $opt, $fh or error "cannot copy $opt: $!";
-            } else {
-                print $fh $opt;
-                if ($opt !~ /;$/) {
-                    print $fh ';';
-                }
-                if ($opt !~ /\n$/) {
-                    print $fh "\n";
-                }
-            }
-        }
+        print $fh $options->{aptopts};
         close $fh;
         if ($verbosity_level >= 3) {
             debug "content of /etc/apt/apt.conf.d/99mmdebstrap:";
@@ -2107,7 +3183,7 @@ sub run_setup() {
         }
     }
 
-    if (scalar @{ $options->{dpkgopts} } > 0
+    if (length $options->{dpkgopts} > 0
         and (!-e "$options->{root}/etc/dpkg/dpkg.cfg.d/99mmdebstrap")) {
         # FIXME: in chrootless mode, dpkg will only read the configuration
         # from the host -- see #808203
@@ -2117,19 +3193,7 @@ sub run_setup() {
         }
         open my $fh, '>', "$options->{root}/etc/dpkg/dpkg.cfg.d/99mmdebstrap"
           or error "cannot open /etc/dpkg/dpkg.cfg.d/99mmdebstrap: $!";
-        foreach my $opt (@{ $options->{dpkgopts} }) {
-            if (-r $opt) {
-                # flush handle because copy() uses syswrite() which bypasses
-                # buffered IO
-                $fh->flush();
-                copy $opt, $fh or error "cannot copy $opt: $!";
-            } else {
-                print $fh $opt;
-                if ($opt !~ /\n$/) {
-                    print $fh "\n";
-                }
-            }
-        }
+        print $fh $options->{dpkgopts};
         close $fh;
         if ($verbosity_level >= 3) {
             debug "content of /etc/dpkg/dpkg.cfg.d/99mmdebstrap:";
@@ -2231,6 +3295,8 @@ sub run_setup() {
                 chmod $mode, "$options->{root}/$file"
                   or error "cannot chmod $file: $!";
             }
+        } elsif (-e $file && -e "$options->{root}/$file") {
+            info "rootfs alreday contains $file";
         } else {
             warning("Host system does not have a $file to copy into the"
                   . " rootfs.");
@@ -2238,38 +3304,37 @@ sub run_setup() {
     }
 
     if ($options->{havemknod}) {
-        foreach my $file (@devfiles) {
-            my ($fname, $mode, $type, $linkname, $devmajor, $devminor)
+        foreach my $file (@linuxdevfiles) {
+            my ($fname, $mode, $type, $linkname, $devmajor, $devminor, undef)
               = @{$file};
-            if ($type == 0) {    # normal file
+            if ($type eq '0') {    # normal file
                 error "type 0 not implemented";
-            } elsif ($type == 1) {    # hardlink
+            } elsif ($type eq '1') {    # hardlink
                 error "type 1 not implemented";
-            } elsif ($type == 2) {    # symlink
+            } elsif ($type eq '2') {    # symlink
                 if (    $options->{mode} eq 'fakechroot'
                     and $linkname =~ /^\/proc/) {
                     # there is no /proc in fakechroot mode
                     next;
                 }
-                symlink $linkname, "$options->{root}/dev/$fname"
-                  or error "cannot create symlink ./dev/$fname";
+                symlink $linkname, "$options->{root}/$fname"
+                  or error "cannot create symlink $fname";
                 next;    # chmod cannot work on symlinks
-            } elsif ($type == 3) {    # character special
-                0 == system('mknod', "$options->{root}/dev/$fname", 'c',
+            } elsif ($type eq '3') {    # character special
+                0 == system('mknod', "$options->{root}/$fname", 'c',
                     $devmajor, $devminor)
                   or error "mknod failed: $?";
-            } elsif ($type == 4) {    # block special
-                0 == system('mknod', "$options->{root}/dev/$fname", 'b',
+            } elsif ($type eq '4') {    # block special
+                0 == system('mknod', "$options->{root}/$fname", 'b',
                     $devmajor, $devminor)
                   or error "mknod failed: $?";
-            } elsif ($type == 5) {    # directory
-                if (-e "$options->{root}/dev/$fname") {
-                    if (!-d "$options->{root}/dev/$fname") {
-                        error
-                          "./dev/$fname already exists but is not a directory";
+            } elsif ($type eq '5') {    # directory
+                if (-e "$options->{root}/$fname") {
+                    if (!-d "$options->{root}/$fname") {
+                        error "$fname already exists but is not a directory";
                     }
                 } else {
-                    my $num_created = make_path "$options->{root}/dev/$fname",
+                    my $num_created = make_path "$options->{root}/$fname",
                       { error => \my $err };
                     if ($err && @$err) {
                         error(
@@ -2279,14 +3344,14 @@ sub run_setup() {
                                   @$err
                             ));
                     } elsif ($num_created == 0) {
-                        error "cannot create $options->{root}/dev/$fname";
+                        error "cannot create $options->{root}/$fname";
                     }
                 }
             } else {
                 error "unsupported type: $type";
             }
-            chmod $mode, "$options->{root}/dev/$fname"
-              or error "cannot chmod ./dev/$fname: $!";
+            chmod $mode, "$options->{root}/$fname"
+              or error "cannot chmod $fname: $!";
         }
     }
 
@@ -2471,27 +3536,8 @@ sub run_download() {
                 dryrun   => $options->{dryrun},
             },
         );
-    } elsif ($options->{variant} eq 'apt') {
-        # if we just want to install Essential:yes packages, apt and their
-        # dependencies then we can make use of libapt treating apt as
-        # implicitly essential. An upgrade with the (currently) empty status
-        # file will trigger an installation of the essential packages plus apt.
-        #
-        # 2018-09-02, #debian-dpkg on OFTC, times in UTC+2
-        # 23:39 < josch> I'll just put it in my script and if it starts
-        #                breaking some time I just say it's apt's fault. :P
-        # 23:42 < DonKult> that is how it usually works, so yes, do that :P (<-
-        #                  and please add that line next to it so you can
-        #                  remind me in 5+ years that I said that after I wrote
-        #                  in the bugreport: "Are you crazy?!? Nobody in his
-        #                  right mind would even suggest depending on it!")
-        @dl_debs = run_apt_download_progress({
-                APT_ARGV => ['dist-upgrade'],
-                dryrun   => $options->{dryrun},
-            },
-        );
     } elsif (any { $_ eq $options->{variant} }
-        ('essential', 'standard', 'important', 'required', 'buildd')) {
+        ('essential', 'apt', 'standard', 'important', 'required', 'buildd')) {
         # 2021-06-07, #debian-apt on OFTC, times in UTC+2
         # 17:27 < DonKult> (?essential includes 'apt' through)
         # 17:30 < josch> DonKult: no, because pkgCacheGen::ForceEssential ",";
@@ -2878,6 +3924,7 @@ sub run_essential() {
         # Example: if the host has --path-exclude set, then this will also
         # affect the chroot. See #808203
         my @chrootless_opts = (
+            '-oDPkg::Chroot-Directory=',
             '-oDPkg::Options::=--force-not-root',
             '-oDPkg::Options::=--force-script-chrootless',
             '-oDPkg::Options::=--root=' . $options->{root},
@@ -2964,8 +4011,14 @@ sub run_install() {
     my $options = shift;
 
     my @pkgs_to_install = (@{ $options->{include} });
+    if ($options->{variant} eq 'extract') {
+        error "must not be called with variant extract";
+    }
+    if (none { $_ eq $options->{variant} } ('custom', 'essential')) {
+        push @pkgs_to_install, 'apt';
+    }
     if ($options->{variant} eq 'buildd') {
-        push @pkgs_to_install, 'build-essential', 'apt';
+        push @pkgs_to_install, 'build-essential';
     }
     if (any { $_ eq $options->{variant} }
         ('required', 'important', 'standard')) {
@@ -3001,6 +4054,7 @@ sub run_install() {
     if ($options->{mode} eq 'chrootless') {
         if (scalar @pkgs_to_install > 0) {
             my @chrootless_opts = (
+                '-oDPkg::Chroot-Directory=',
                 '-oDPkg::Options::=--force-not-root',
                 '-oDPkg::Options::=--force-script-chrootless',
                 '-oDPkg::Options::=--root=' . $options->{root},
@@ -3054,8 +4108,6 @@ sub run_install() {
                             $options->{mode} eq 'fakechroot'
                             ? ('-o', 'DPkg::Install::Recursive::force=true')
                             : (),
-                            '-o',
-                            "DPkg::Chroot-Directory=$options->{root}",
                             '--yes',
                             'install'
                         ],
@@ -3134,21 +4186,13 @@ sub run_cleanup() {
     } else {
         # clean up temporary configuration file
         unlink "$options->{root}/etc/apt/apt.conf.d/00mmdebstrap"
-          or error "failed to unlink /etc/apt/apt.conf.d/00mmdebstrap: $!";
+          or warning "failed to unlink /etc/apt/apt.conf.d/00mmdebstrap: $!";
+        unlink "$options->{root}/etc/apt/apt.conf.d/99debconf"
+          or warning "failed to unlink /etc/apt/apt.conf.d/99debconf: $!";
 
         if (defined $ENV{APT_CONFIG} && -e $ENV{APT_CONFIG}) {
             unlink $ENV{APT_CONFIG}
               or error "failed to unlink $ENV{APT_CONFIG}: $!";
-        }
-
-        if (any { $_ eq 'cleanup/mmdebstrap/qemu' } @{ $options->{skip} }) {
-            info "skipping cleanup/mmdebstrap/qemu as requested";
-        } elsif (defined $options->{qemu}
-            and any { $_ eq $options->{mode} } ('root', 'unshare')
-              and -e "$options->{root}/usr/bin/qemu-$options->{qemu}-static") {
-            unlink "$options->{root}/usr/bin/qemu-$options->{qemu}-static"
-              or error
-              "cannot unlink /usr/bin/qemu-$options->{qemu}-static: $!";
         }
     }
 
@@ -3178,11 +4222,16 @@ sub run_cleanup() {
             # this file if possible. Having an empty file in place is useful
             # because it allows a temporary file to be bind-mounted over the
             # real file, in case the image is used read-only.
-            unlink "$options->{root}/etc/machine-id"
-              or error "cannot unlink /etc/machine-id: $!";
-            open my $fh, '>', "$options->{root}/etc/machine-id"
-              or error "failed to open(): $!";
-            close $fh;
+            if (any { $_ eq 'cleanup/reproducible/machine-id' }
+                @{ $options->{skip} }) {
+                info "skipping cleanup/reproducible/machine-id as requested";
+            } else {
+                unlink "$options->{root}/etc/machine-id"
+                  or error "cannot unlink /etc/machine-id: $!";
+                open my $fh, '>', "$options->{root}/etc/machine-id"
+                  or error "failed to open(): $!";
+                close $fh;
+            }
         }
     }
 
@@ -3250,14 +4299,15 @@ sub run_cleanup() {
         # same as debootstrap and create a directory including device nodes.
         if ($options->{format} ne 'directory' && any { $_ eq 'output/dev' }
             @{ $options->{skip} }) {
-            foreach my $file (@devfiles) {
-                my ($fname, $mode, $type, $linkname, $devmajor, $devminor)
+            foreach my $file (@linuxdevfiles) {
+                my ($fname, $mode, $type, $linkname, $devmajor, $devminor,
+                    undef)
                   = @{$file};
-                if (!-e "$options->{root}/dev/$fname") {
+                if (!-e "$options->{root}/$fname") {
                     next;
                 }
                 # do not remove ./dev itself
-                if ($fname eq "") {
+                if ($fname eq "./dev/") {
                     next;
                 }
                 if ($type == 0) {    # normal file
@@ -3266,11 +4316,11 @@ sub run_cleanup() {
                     error "type 1 not implemented";
                 } elsif (any { $_ eq $type } (2, 3, 4))
                 {                         # symlink, char, block
-                    unlink "$options->{root}/dev/$fname"
-                      or error "failed to unlink ./dev/$fname: $!";
+                    unlink "$options->{root}/$fname"
+                      or error "failed to unlink $fname: $!";
                 } elsif ($type == 5) {    # directory
-                    rmdir "$options->{root}/dev/$fname"
-                      or error "failed to unlink ./dev/$fname: $!";
+                    rmdir "$options->{root}/$fname"
+                      or error "failed to unlink $fname: $!";
                 } else {
                     error "unsupported type: $type";
                 }
@@ -4096,6 +5146,7 @@ sub get_suite_by_vendor {
         'ubuntu' => {},
         'tanglu' => {},
         'kali'   => {},
+        'elxr'   => {},
     );
 
     # pre-fill with some known values
@@ -4116,6 +5167,9 @@ sub get_suite_by_vendor {
     }
     foreach my $suite ('kali-dev', 'kali-rolling', 'kali-bleeding-edge') {
         $suite_by_vendor{'kali'}->{$suite} = 0;
+    }
+    foreach my $suite ('aria') {
+        $suite_by_vendor{'elxr'}->{$suite} = 0;
     }
     foreach
       my $suite ('trusty', 'xenial', 'zesty', 'artful', 'bionic', 'cosmic') {
@@ -4165,6 +5219,9 @@ sub get_suite_by_vendor {
             } elsif ($target eq "kali"
                 and not exists $suite_by_vendor{'kali'}->{$suite}) {
                 $suite_by_vendor{'kali'}->{$suite} = 0;
+            } elsif ($target eq "elxr"
+                and not exists $suite_by_vendor{'elxr'}->{$suite}) {
+                $suite_by_vendor{'elxr'}->{$suite} = 0;
             }
         }
         closedir($dh);
@@ -4219,6 +5276,8 @@ sub get_keyring_by_suite {
             return '/usr/share/keyrings/tanglu-archive-keyring.gpg';
         } elsif ($vendor eq 'kali') {
             return '/usr/share/keyrings/kali-archive-keyring.gpg';
+        } elsif ($vendor eq 'elxr') {
+            return '/usr/share/keyrings/elxr-archive-keyring.gpg';
         } else {
             error "unknown vendor: $vendor";
         }
@@ -4247,10 +5306,15 @@ sub get_sourceslist_by_suite {
     my $compstr         = shift;
     my $suite_by_vendor = shift;
 
+    if (!$suite) {
+        error "get_sourceslist_by_suite cannot operate with an empty suite";
+    }
+
     my @debstable    = keys %{ $suite_by_vendor->{'debian'} };
     my @ubuntustable = keys %{ $suite_by_vendor->{'ubuntu'} };
     my @tanglustable = keys %{ $suite_by_vendor->{'tanglu'} };
     my @kali         = keys %{ $suite_by_vendor->{'kali'} };
+    my @elxr         = keys %{ $suite_by_vendor->{'elxr'} };
 
     my $mirror    = 'http://deb.debian.org/debian';
     my $secmirror = 'http://security.debian.org/debian-security';
@@ -4288,6 +5352,8 @@ sub get_sourceslist_by_suite {
         $mirror = 'http://archive.tanglu.org/tanglu';
     } elsif (any { $_ eq $suite } @kali) {
         $mirror = 'https://http.kali.org/kali';
+    } elsif (any { $_ eq $suite } @elxr) {
+        $mirror = 'https://mirror.elxr.dev';
     }
     my $sourceslist = '';
     $sourceslist .= "deb$signedby $mirror $suite $compstr\n";
@@ -4302,8 +5368,8 @@ sub get_sourceslist_by_suite {
         # the security mirror changes, starting with bullseye
         # https://lists.debian.org/87r26wqr2a.fsf@43-1.org
         my $bullseye_or_later = 0;
-        if (any { $_ eq $suite } ('stable', 'bullseye', 'bookworm', 'trixie'))
-        {
+        if (any { $_ eq $suite }
+            ('oldstable', 'stable', 'bullseye', 'bookworm', 'trixie')) {
             $bullseye_or_later = 1;
         }
         my $distro_info = '/usr/share/distro-info/debian.csv';
@@ -4403,32 +5469,41 @@ sub guess_sources_format {
 }
 
 sub approx_disk_usage {
-    my $directory = shift;
+    my $directory  = shift;
+    my $block_size = shift;
     info "approximating disk usage...";
     # the "du" utility reports different results depending on the underlying
     # filesystem, see https://bugs.debian.org/650077 for a discussion
     #
     # we use code similar to the one used by dpkg-gencontrol instead
     #
-    # Regular files are measured in number of 1024 byte blocks. All other
-    # entries are assumed to take one block of space.
+    # Regular files are measured in number of $block_size byte blocks. All
+    # other entries are assumed to take one block of space.
     #
     # We ignore /dev because depending on the mode, the directory might be
     # populated or not and we want consistent disk usage results independent
     # of the mode.
-    my $installed_size      = 0;
+    my $installed_size = 0;
+    my %hardlink;
     my $scan_installed_size = sub {
         if ($File::Find::name eq "$directory/dev") {
             # add all entries of @devfiles once
-            $installed_size += scalar @devfiles;
+            $installed_size += scalar @linuxdevfiles;
+            return;
         } elsif ($File::Find::name =~ /^$directory\/dev\//) {
             # ignore everything below /dev
-        } elsif (-l $File::Find::name) {
-            # -f follows symlinks, so we first check if we have a symlink
-            $installed_size += 1;
-        } elsif (-f $File::Find::name) {
-            # add file size in 1024 byte blocks, rounded up
-            $installed_size += int(((-s $File::Find::name) + 1024) / 1024);
+            return;
+        }
+
+        lstat or error "cannot stat $File::Find::name";
+
+        if (-f _ or -l _) {
+            my ($dev, $ino, $nlink) = (lstat _)[0, 1, 3];
+            return if exists $hardlink{"$dev:$ino"};
+            # Track hardlinks to avoid repeated additions.
+            $hardlink{"$dev:$ino"} = 1 if $nlink > 1;
+            # add file size in $block_size byte blocks, rounded up
+            $installed_size += int(((-s _) + $block_size) / $block_size);
         } else {
             # all other entries are assumed to only take up one block
             $installed_size += 1;
@@ -4439,8 +5514,9 @@ sub approx_disk_usage {
     # image. See https://bugs.debian.org/1005857
     find({ wanted => $scan_installed_size, no_chdir => 1 }, $directory);
 
-    # because the above is only a heuristic we add 10% extra for good measure
-    return int($installed_size * 1.1);
+    # the above is only a heuristic and especially ext4 will consume quite a
+    # few more blocks than the heuristic above is going to compute
+    return int($installed_size * 1.2);
 }
 
 sub main() {
@@ -4503,9 +5579,9 @@ sub main() {
     # obtain the correct defaults for the keyring locations that apt knows
     # about
     my $apttrusted
-      = `eval \$(apt-config shell v Dir::Etc::trusted/f); printf \$v`;
+      = `eval \$(apt-config shell v Dir::Etc::trusted/f); printf %s \$v`;
     my $apttrustedparts
-      = `eval \$(apt-config shell v Dir::Etc::trustedparts/d); printf \$v`;
+      = `eval \$(apt-config shell v Dir::Etc::trustedparts/d); printf %s \$v`;
 
     chomp(my $hostarch = `dpkg --print-architecture`);
     my $options = {
@@ -4515,8 +5591,8 @@ sub main() {
         architectures   => [$hostarch],
         mode            => 'auto',
         format          => 'auto',
-        dpkgopts        => [],
-        aptopts         => [],
+        dpkgopts        => '',
+        aptopts         => '',
         apttrusted      => $apttrusted,
         apttrustedparts => $apttrustedparts,
         noop            => [],
@@ -4583,9 +5659,44 @@ sub main() {
         },
         'architectures=s@' => \$options->{architectures},
         'mode=s'           => \$options->{mode},
-        'dpkgopt=s@'       => \$options->{dpkgopts},
-        'aptopt=s@'        => \$options->{aptopts},
-        'keyring=s'        => sub {
+        'dpkgopt=s'        => sub {
+            my ($opt_name, $opt_value) = @_;
+            if (-r $opt_value) {
+                open my $fh, '<', $opt_value
+                  or error "failed to open $opt_value: $!";
+                $options->{dpkgopts} .= do { local $/; <$fh> };
+                if ($options->{dpkgopts} !~ /\n$/) {
+                    print $fh "\n";
+                }
+                close $fh;
+            } else {
+                $options->{dpkgopts} .= $opt_value;
+                if ($opt_value !~ /\n$/) {
+                    $options->{dpkgopts} .= "\n";
+                }
+            }
+        },
+        'aptopt=s' => sub {
+            my ($opt_name, $opt_value) = @_;
+            if (-r $opt_value) {
+                open my $fh, '<', $opt_value
+                  or error "failed to open $opt_value: $!";
+                $options->{aptopts} .= do { local $/; <$fh> };
+                if ($options->{aptopts} !~ /\n$/) {
+                    print $fh "\n";
+                }
+                close $fh;
+            } else {
+                $options->{aptopts} .= $opt_value;
+                if ($opt_value !~ /;$/) {
+                    $options->{aptopts} .= ';';
+                }
+                if ($opt_value !~ /\n$/) {
+                    $options->{aptopts} .= "\n";
+                }
+            }
+        },
+        'keyring=s' => sub {
             my ($opt_name, $opt_value) = @_;
             if ($opt_value =~ /"/) {
                 error "--keyring: apt cannot handle paths with double quotes:"
@@ -4719,7 +5830,7 @@ sub main() {
                 }
                 push @{ $options->{skip} }, $skip;
             }
-        }) or pod2usage(-exitval => 2, -verbose => 1);
+        }) or pod2usage(-exitval => 2, -verbose => 0);
 
     if (defined($logfile)) {
         open(STDERR, '>', $logfile) or error "cannot open $logfile: $!";
@@ -4785,13 +5896,13 @@ sub main() {
         $options->{format} = 'directory';
     }
     my @valid_formats
-      = ('auto', 'directory', 'tar', 'squashfs', 'ext2', 'null');
+      = ('auto', 'directory', 'tar', 'squashfs', 'ext2', 'ext4', 'null');
     if (none { $_ eq $options->{format} } @valid_formats) {
         error "invalid format. Choose from " . (join ', ', @valid_formats);
     }
 
     # setting PATH for chroot, ldconfig, start-stop-daemon...
-    my $defaultpath = `eval \$(apt-config shell v DPkg::Path); printf \$v`;
+    my $defaultpath = `eval \$(apt-config shell v DPkg::Path); printf %s \$v`;
     if (length $ENV{PATH}) {
         ## no critic (Variables::RequireLocalizedPunctuationVars)
         $ENV{PATH} = "$ENV{PATH}:$defaultpath";
@@ -4936,9 +6047,17 @@ sub main() {
             test_unshare_userns(1);
         }
     } elsif ($options->{mode} eq 'chrootless') {
-        if ($EFFECTIVE_USER_ID == 0) {
-            warning "running chrootless mode as root might damage the host "
-              . "system";
+        if (any { $_ eq 'check/chrootless' } @{ $options->{skip} }) {
+            info "skipping check/chrootless as requested";
+        } else {
+            my $ischroot = 0 == system 'ischroot';
+            if (   $EFFECTIVE_USER_ID == 0
+                && !exists $ENV{FAKEROOTKEY}
+                && !$ischroot) {
+                error
+                  "running chrootless mode as root without fakeroot might "
+                  . "damage the host system if not run inside a chroot";
+            }
         }
     } else {
         error "unknown mode: $options->{mode}";
@@ -5046,6 +6165,7 @@ sub main() {
             armhf    => 'arm',
             hppa     => 'hppa',
             i386     => 'i386',
+            loong64  => 'loongarch64',
             m68k     => 'm68k',
             mips     => 'mips',
             mips64   => 'mips64',
@@ -5199,6 +6319,12 @@ sub main() {
         }
     }
 
+    if (defined $options->{qemu} && $options->{mode} eq 'fakechroot') {
+        if (!can_execute 'dpkg-architecture') {
+            error "cannot find dpkg-architecture";
+        }
+    }
+
     {
         $options->{suite} = undef;
         if (scalar @ARGV > 0) {
@@ -5311,7 +6437,7 @@ sub main() {
                 }
                 # initialize gpg trustdb with empty one
                 {
-                    0 == system(@gpgcmd, '--update-trustdb')
+                    0 == system(@gpgcmd, '--check-trustdb')
                       or error "gpg failed to initialize trustdb:: $?";
                 }
                 if (!-d $options->{apttrustedparts}) {
@@ -5448,6 +6574,10 @@ sub main() {
                               };
                         }
                     } elsif ($arg =~ /:\/\//) {
+                        if (!$options->{suite}) {
+                            error(  "cannot create sources.list entry for URI"
+                                  . "with empty suite");
+                        }
                         my $content = join ' ',
                           (
                             "deb$signedby",
@@ -5503,6 +6633,9 @@ sub main() {
                         error "invalid mirror: $arg";
                     }
                 }
+            } elsif (!length($options->{suite})) {
+                warning
+                  "cannot guess apt sources.list entry with empty suite name";
             } else {
                 my $sourceslist
                   = get_sourceslist_by_suite($options->{suite},
@@ -5535,9 +6668,15 @@ sub main() {
 
     if ($options->{target} eq '-') {
         if (POSIX::isatty STDOUT) {
-            error "stdout is a an interactive tty";
+            error "stdout is an interactive tty";
         }
     } else {
+        if (!-e dirname($options->{target})) {
+            error "path leading to $options->{target} does not exist";
+        }
+        if (!-d dirname($options->{target})) {
+            error "parent of $options->{target} is not a directory";
+        }
         my $abs_path = abs_path($options->{target});
         if (!defined $abs_path) {
             error "unable to get absolute path of target directory"
@@ -5636,6 +6775,30 @@ sub main() {
             if ($exitstatus != 0) {
                 error "genext2fs failed with exit status: $exitstatus";
             }
+        } elsif ($options->{target} =~ /\.ext4$/) {
+            $options->{format} = 'ext4';
+            # check if the installed version of e2fsprogs supports tarballs on
+            # stdin
+            (undef, my $filename) = tempfile(
+                "mmdebstrap.ext4.XXXXXXXXXXXX",
+                OPEN   => 0,
+                TMPDIR => 1
+            );
+            # creating file to suppress message "Creating regular file ..."
+            { open my $fh, '>', $filename; }
+            open my $fh, '|-', 'mke2fs', '-q', '-F', '-o', 'Linux', '-T',
+              'ext4', '-b', '4096', '-d', '-', $filename,
+              '16384' // error "failed to fork(): $!";
+            # write 10240 null-bytes to mke2fs -- this represents an empty
+            # tar archive
+            print $fh ("\0" x 10240)
+              or error "cannot write to mke2fs process";
+            close $fh;
+            my $exitstatus = $?;
+            unlink $filename // die "cannot unlink $filename";
+            if ($exitstatus != 0) {
+                error "mke2fs failed with exit status: $exitstatus";
+            }
         } else {
             $options->{format} = 'directory';
         }
@@ -5653,25 +6816,40 @@ sub main() {
         info "ignoring target $options->{target} with null format";
     }
 
+    my $blocksize = -1;
     if ($options->{format} eq 'ext2') {
         if (!can_execute 'genext2fs') {
             error "need genext2fs for ext2 format";
         }
+        $blocksize = 1024;
+    } elsif ($options->{format} eq 'ext4') {
+        if (!can_execute 'mke2fs', '-V') {
+            error "need mke2fs for ext4 format";
+        }
+        require DynaLoader;
+        my $libarchive = DynaLoader::dl_load_file("libarchive.so.13", 0)
+          or error "need libarchive for ext4 format";
+        $blocksize = 4096;
     } elsif ($options->{format} eq 'squashfs') {
         if (!can_execute 'tar2sqfs') {
             error "need tar2sqfs binary from the squashfs-tools-ng package";
         }
+        $blocksize = 1048576;
     }
 
-    if (any { $_ eq $options->{format} } ('tar', 'squashfs', 'ext2', 'null')) {
+    my $rootdir_handle;
+    if (any { $_ eq $options->{format} }
+        ('tar', 'squashfs', 'ext2', 'ext4', 'null')) {
         if ($options->{format} ne 'null') {
+            #<<< perltidy 20220613 formatting
             if (any { $_ eq $options->{variant} } ('extract', 'custom')
                   and $options->{mode} eq 'fakechroot') {
-                info "creating a tarball or squashfs image or ext2 image in"
+                info "creating a tarball, squashfs, ext2 or ext4 image in"
                   . " fakechroot mode might fail in extract and"
                   . " custom variants because there might be no tar inside the"
                   . " chroot";
             }
+            #>>>
             # try to fail early if target tarball or squashfs image cannot be
             # opened for writing
             if ($options->{target} ne '-') {
@@ -5692,15 +6870,24 @@ sub main() {
         # directory
         $options->{root} = tempdir('mmdebstrap.XXXXXXXXXX', TMPDIR => 1);
         info "using $options->{root} as tempdir";
+        # add an flock on the temporary directory to prevent cleanup by systemd
+        # see section Age in tmpfiles.d(5)
+        sysopen($rootdir_handle, $options->{root}, O_RDONLY | O_DIRECTORY)
+          or error "Failed to sysopen $options->{root}: $!\n";
+        flock($rootdir_handle, LOCK_EX)
+          or error "Unable to flock $options->{root}: $!\n";
+
         # in unshare and root mode, other users than the current user need to
         # access the rootfs, most prominently, the _apt user. Thus, make the
         # temporary directory world readable.
+        #<<< perltidy 20220613 formatting
         if (
             any { $_ eq $options->{mode} } ('unshare', 'root')
               or ($EFFECTIVE_USER_ID == 0 and $options->{mode} eq 'chrootless')
         ) {
             chmod 0755, $options->{root} or error "cannot chmod root: $!";
         }
+        #>>>
     } elsif ($options->{format} eq 'directory') {
         # user does not seem to have specified a tarball as output, thus work
         # directly in the supplied directory
@@ -5851,40 +7038,86 @@ sub main() {
     # If both the above assertion change, we can stop creating /dev entries as
     # well.
     my $devtar = '';
-    if (any { $_ eq $options->{format} } ('tar', 'squashfs', 'ext2')) {
-        foreach my $file (@devfiles) {
-            my ($fname, $mode, $type, $linkname, $devmajor, $devminor)
+    if (any { $_ eq $options->{format} } ('tar', 'squashfs', 'ext2', 'ext4')) {
+        my @entries = ();
+
+        my @paxentries;
+        if ($options->{nativearch} eq "hurd-i386") {
+            @paxentries = @hurdfiles;
+        } else {
+            @paxentries = @linuxdevfiles;
+        }
+
+        foreach my $paxentry (@paxentries) {
+            my ($name, $mode, $type, $linktarget, $major, $minor, $content)
+              = @{$paxentry};
+            if (defined $content) {
+                $content = "SCHILY.xattr.gnu.translator=$content";
+
+             # In the beginning the decimal length of the field is recorded.
+             # But the length includes the length of the number itself.
+             # Luckily we only need to support decimal numbers with two digits.
+                if ((length $content) + 4 > 99 || (length $content) + 4 < 10) {
+                    exit 1;    # not supported yet
+                }
+                my $len      = (length $content) + 4;
+                my $dirname  = dirname $name;
+                my $basename = basename $name;
+                push @entries,
+                  [
+                    "$dirname/PaxHeaders/$basename",
+                    0, 'x', undef, undef, undef, "$len $content\n"
+                  ];
+            }
+            push @entries,
+              [$name, $mode, $type, $linktarget, $major, $minor, undef];
+        }
+
+        foreach my $file (@entries) {
+            my ($fname, $mode, $type, $linktarget, $devmajor, $devminor,
+                $content)
               = @{$file};
-            if (length "./dev/$fname" > 100) {
+            if (length "$fname" > 100) {
                 error "tar entry cannot exceed 100 characters";
             }
-            if ($type == 3
+            if ($type eq '3'
                 and any { $_ eq 'output/mknod' } @{ $options->{skip} }) {
-                info "skipping output/mknod as requested for ./dev/$fname";
+                info "skipping output/mknod as requested for $fname";
                 next;
             }
+            my $size  = defined $content ? length $content : 0;
+            my $etime = $type eq 'x'     ? 0               : $mtime;
             my $entry = pack(
-                'a100 a8 a8 a8 a12 a12 A8 a1 a100 a8 a32 a32 a8 a8 a155 x12',
-                "./dev/$fname",
+                # name mode uid gid size mtime type linktarget
+                'a100 a8 a8 a8 a12 a12 A8 a1 a100 '
+                  # magic version username groupname major minor prefix
+                  . 'a6 a2 a32 a32 a8 a8 a155 x12',
+                $fname,
                 sprintf('%07o',  $mode),
                 sprintf('%07o',  0),        # uid
                 sprintf('%07o',  0),        # gid
-                sprintf('%011o', 0),        # size
-                sprintf('%011o', $mtime),
+                sprintf('%011o', $size),    # size
+                sprintf('%011o', $etime),
                 '',                         # checksum
-                $type,
-                $linkname,
-                "ustar  ",
+                $type,                      # type
+                $linktarget // '',          # linktarget
+                "ustar",                    # magic
+                "00",                       # version
                 '',                         # username
                 '',                         # groupname
                 defined($devmajor) ? sprintf('%07o', $devmajor) : '',
                 defined($devminor) ? sprintf('%07o', $devminor) : '',
                 '',                         # prefix
             );
+
             # compute and insert checksum
             substr($entry, 148, 7)
               = sprintf("%06o\0", unpack("%16C*", $entry));
             $devtar .= $entry;
+
+            if (length $content) {
+                $devtar .= (pack 'a512', $content);
+            }
         }
     } elsif (any { $_ eq $options->{format} } ('directory', 'null')) {
         # nothing to do
@@ -5900,13 +7133,18 @@ sub main() {
         '--numeric-owner',
         '--one-file-system',
         '--format=pax',
+        # If POSIXLY_CORRECT were set in the environment, the ustar header
+        # name would include the process id. This forces tar to always use
+        # %d/PaxHeaders/%f even if the POSIXLY_CORRECT environment variable is
+        # set. atime and ctime are deleted for improved reproducibility.
         '--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime',
         '-c',
         '--exclude=./lost+found'
     );
     # only exclude ./dev if device nodes are written out (the default)
     if (none { $_ eq 'output/dev' } @{ $options->{skip} }) {
-        push @taropts, '--exclude=./dev';
+        push @taropts, '--exclude=./dev', '--exclude=./servers',
+          '--exclude=./servers/*';
     }
     # tar2sqfs and genext2fs do not support extended attributes
     if ($options->{format} eq "squashfs") {
@@ -5920,6 +7158,9 @@ sub main() {
         push @taropts, '--xattrs', '--xattrs-exclude=system.*';
     } elsif ($options->{format} eq "ext2") {
         warning "genext2fs does not support extended attributes";
+        warning "ext2 does not support sub-second precision timestamps";
+        warning "ext2 does not support timestamps beyond 2038 January 18";
+        warning "ext2 inode size of 128 prevents removing these limitations";
     } else {
         push @taropts, '--xattrs';
     }
@@ -5928,8 +7169,6 @@ sub main() {
     # handler in the parent and child without getting interrupted
     my $sigset = POSIX::SigSet->new(SIGINT, SIGHUP, SIGPIPE, SIGTERM);
     POSIX::sigprocmask(SIG_BLOCK, $sigset) or error "Can't block signals: $!";
-
-    my $pid;
 
     # a pipe to transfer the final tarball from the child to the parent
     pipe my $rfh, my $wfh;
@@ -5945,163 +7184,108 @@ sub main() {
     #   b) it puts code writing the protocol outside of the helper/listener
     #   c) the forked listener process cannot communicate to its parent
     pipe my $nblkreader, my $nblkwriter or error "pipe failed: $!";
+
+    my $worker = sub {
+        # child
+        local $SIG{'INT'}  = 'DEFAULT';
+        local $SIG{'HUP'}  = 'DEFAULT';
+        local $SIG{'PIPE'} = 'DEFAULT';
+        local $SIG{'TERM'} = 'DEFAULT';
+
+        # unblock all delayed signals (and possibly handle them)
+        POSIX::sigprocmask(SIG_UNBLOCK, $sigset)
+          or error "Can't unblock signals: $!";
+
+        close $rfh;
+        close $parentsock;
+        open(STDOUT, '>&', STDERR) or error "cannot open STDOUT: $!";
+
+        setup($options);
+
+        print $childsock (pack('n', 0) . 'adios');
+        $childsock->flush();
+
+        close $childsock;
+
+        close $nblkreader;
+        if (!$options->{dryrun} && any { $_ eq $options->{format} }
+            ('ext2', 'ext4')) {
+            my $numblocks = approx_disk_usage($options->{root}, $blocksize);
+            print $nblkwriter "$numblocks\n";
+            $nblkwriter->flush();
+        }
+        close $nblkwriter;
+
+        if ($options->{dryrun}) {
+            info "simulate creating tarball...";
+        } elsif (any { $_ eq $options->{format} }
+            ('tar', 'squashfs', 'ext2', 'ext4')) {
+            info "creating tarball...";
+
+            # redirect tar output to the writing end of the pipe so
+            # that the parent process can capture the output
+            open(STDOUT, '>&', $wfh) or error "cannot open STDOUT: $!";
+
+            # Add ./dev as the first entries of the tar file.
+            # We cannot add them after calling tar, because there is no
+            # way to prevent tar from writing NULL entries at the end.
+            if (any { $_ eq 'output/dev' } @{ $options->{skip} }) {
+                info "skipping output/dev as requested";
+            } else {
+                print $devtar;
+            }
+
+            if ($options->{mode} eq 'unshare') {
+                # pack everything except ./dev
+                0 == system('tar', @taropts, '-C', $options->{root}, '.')
+                  or error "tar failed: $?";
+            } elsif ($options->{mode} eq 'fakechroot') {
+                # By default, FAKECHROOT_EXCLUDE_PATH includes /proc and /sys
+                # which means that the resulting tarball will contain the
+                # permission and ownership information of /proc and /sys from
+                # the outside, which we want to avoid.
+                ## no critic (Variables::RequireLocalizedPunctuationVars)
+                $ENV{FAKECHROOT_EXCLUDE_PATH} = "/dev";
+                # Fakechroot requires tar to run inside the chroot or otherwise
+                # absolute symlinks will include the path to the root directory
+                0 == system('chroot', $options->{root}, 'tar',
+                    @taropts, '-C', '/', '.')
+                  or error "tar failed: $?";
+            } elsif (any { $_ eq $options->{mode} } ('root', 'chrootless')) {
+                # If the chroot directory is not owned by the root user, then
+                # we assume that no measure was taken to fake root permissions.
+                # Since the final tarball should contain entries with root
+                # ownership, we instruct tar to do so.
+                my @owneropts = ();
+                if ((stat $options->{root})[4] != 0) {
+                    push @owneropts, '--owner=0', '--group=0',
+                      '--numeric-owner';
+                }
+                0 == system('tar', @taropts, @owneropts, '-C',
+                    $options->{root}, '.')
+                  or error "tar failed: $?";
+            } else {
+                error "unknown mode: $options->{mode}";
+            }
+
+            info "done";
+        } elsif (any { $_ eq $options->{format} } ('directory', 'null')) {
+            # nothing to do
+        } else {
+            error "unknown format: $options->{format}";
+        }
+
+        exit 0;
+    };
+
+    my $pid;
     if ($options->{mode} eq 'unshare') {
-        $pid = get_unshare_cmd(
-            sub {
-                # child
-                local $SIG{'INT'}  = 'DEFAULT';
-                local $SIG{'HUP'}  = 'DEFAULT';
-                local $SIG{'PIPE'} = 'DEFAULT';
-                local $SIG{'TERM'} = 'DEFAULT';
-
-                # unblock all delayed signals (and possibly handle them)
-                POSIX::sigprocmask(SIG_UNBLOCK, $sigset)
-                  or error "Can't unblock signals: $!";
-
-                close $rfh;
-                close $parentsock;
-                open(STDOUT, '>&', STDERR) or error "cannot open STDOUT: $!";
-
-                setup($options);
-
-                print $childsock (pack('n', 0) . 'adios');
-                $childsock->flush();
-
-                close $childsock;
-
-                close $nblkreader;
-                if (!$options->{dryrun} && $options->{format} eq 'ext2') {
-                    my $numblocks = approx_disk_usage($options->{root});
-                    print $nblkwriter "$numblocks\n";
-                    $nblkwriter->flush();
-                }
-                close $nblkwriter;
-
-                if ($options->{dryrun}) {
-                    info "simulate creating tarball...";
-                } elsif (any { $_ eq $options->{format} }
-                    ('tar', 'squashfs', 'ext2')) {
-                    info "creating tarball...";
-
-                    # redirect tar output to the writing end of the pipe so
-                    # that the parent process can capture the output
-                    open(STDOUT, '>&', $wfh) or error "cannot open STDOUT: $!";
-
-                    # Add ./dev as the first entries of the tar file.
-                    # We cannot add them after calling tar, because there is no
-                    # way to prevent tar from writing NULL entries at the end.
-                    if (any { $_ eq 'output/dev' } @{ $options->{skip} }) {
-                        info "skipping output/dev as requested";
-                    } else {
-                        print $devtar;
-                    }
-
-                    # pack everything except ./dev
-                    0 == system('tar', @taropts, '-C', $options->{root}, '.')
-                      or error "tar failed: $?";
-
-                    info "done";
-                } elsif (any { $_ eq $options->{format} }
-                    ('directory', 'null')) {
-                    # nothing to do
-                } else {
-                    error "unknown format: $options->{format}";
-                }
-
-                exit 0;
-            },
-            \@idmap
-        );
+        $pid = get_unshare_cmd($worker, \@idmap);
     } elsif (any { $_ eq $options->{mode} }
         ('root', 'fakechroot', 'chrootless')) {
         $pid = fork() // error "fork() failed: $!";
         if ($pid == 0) {
-            local $SIG{'INT'}  = 'DEFAULT';
-            local $SIG{'HUP'}  = 'DEFAULT';
-            local $SIG{'PIPE'} = 'DEFAULT';
-            local $SIG{'TERM'} = 'DEFAULT';
-
-            # unblock all delayed signals (and possibly handle them)
-            POSIX::sigprocmask(SIG_UNBLOCK, $sigset)
-              or error "Can't unblock signals: $!";
-
-            close $rfh;
-            close $parentsock;
-            open(STDOUT, '>&', STDERR) or error "cannot open STDOUT: $!";
-
-            setup($options);
-
-            print $childsock (pack('n', 0) . 'adios');
-            $childsock->flush();
-
-            close $childsock;
-
-            close $nblkreader;
-            if (!$options->{dryrun} && $options->{format} eq 'ext2') {
-                my $numblocks = approx_disk_usage($options->{root});
-                print $nblkwriter $numblocks;
-                $nblkwriter->flush();
-            }
-            close $nblkwriter;
-
-            if ($options->{dryrun}) {
-                info "simulate creating tarball...";
-            } elsif (any { $_ eq $options->{format} }
-                ('tar', 'squashfs', 'ext2')) {
-                info "creating tarball...";
-
-                # redirect tar output to the writing end of the pipe so that
-                # the parent process can capture the output
-                open(STDOUT, '>&', $wfh) or error "cannot open STDOUT: $!";
-
-                # Add ./dev as the first entries of the tar file.
-                # We cannot add them after calling tar, because there is no way
-                # to prevent tar from writing NULL entries at the end.
-                if (any { $_ eq 'output/dev' } @{ $options->{skip} }) {
-                    info "skipping output/dev as requested";
-                } else {
-                    print $devtar;
-                }
-
-                if ($options->{mode} eq 'fakechroot') {
-                    # By default, FAKECHROOT_EXCLUDE_PATH includes /proc and
-                    # /sys which means that the resulting tarball will contain
-                    # the permission and ownership information of /proc and
-                    # /sys from the outside, which we want to avoid.
-                    ## no critic (Variables::RequireLocalizedPunctuationVars)
-                    $ENV{FAKECHROOT_EXCLUDE_PATH} = "/dev";
-                    # Fakechroot requires tar to run inside the chroot or
-                    # otherwise absolute symlinks will include the path to the
-                    # root directory
-                    0 == system('chroot', $options->{root}, 'tar',
-                        @taropts, '-C', '/', '.')
-                      or error "tar failed: $?";
-                } elsif (any { $_ eq $options->{mode} } ('root', 'chrootless'))
-                {
-                    # If the chroot directory is not owned by the root user,
-                    # then we assume that no measure was taken to fake root
-                    # permissions. Since the final tarball should contain
-                    # entries with root ownership, we instruct tar to do so.
-                    my @owneropts = ();
-                    if ((stat $options->{root})[4] != 0) {
-                        push @owneropts, '--owner=0', '--group=0',
-                          '--numeric-owner';
-                    }
-                    0 == system('tar', @taropts, @owneropts, '-C',
-                        $options->{root}, '.')
-                      or error "tar failed: $?";
-                } else {
-                    error "unknown mode: $options->{mode}";
-                }
-
-                info "done";
-            } elsif (any { $_ eq $options->{format} } ('directory', 'null')) {
-                # nothing to do
-            } else {
-                error "unknown format: $options->{format}";
-            }
-
-            exit 0;
+            $worker->();
         }
     } else {
         error "unknown mode: $options->{mode}";
@@ -6156,7 +7340,8 @@ sub main() {
 
     my $numblocks = 0;
     close $nblkwriter;
-    if (!$options->{dryrun} && $options->{format} eq 'ext2') {
+    if (!$options->{dryrun} && any { $_ eq $options->{format} }
+        ('ext2', 'ext4')) {
         $numblocks = <$nblkreader>;
         if (defined $numblocks) {
             chomp $numblocks;
@@ -6175,9 +7360,11 @@ sub main() {
         # nothing to do
     } elsif (any { $_ eq $options->{format} } ('directory', 'null')) {
         # nothing to do
-    } elsif ($options->{format} eq 'ext2' && $numblocks <= 0) {
+    } elsif ((any { $_ eq $options->{format} } ('ext2', 'ext4'))
+        && $numblocks <= 0) {
         # nothing to do because of invalid $numblocks
-    } elsif (any { $_ eq $options->{format} } ('tar', 'squashfs', 'ext2')) {
+    } elsif (any { $_ eq $options->{format} }
+        ('tar', 'squashfs', 'ext2', 'ext4')) {
         # we use eval() so that error() doesn't take this process down and
         # thus leaves the setup() process without a parent
         eval {
@@ -6186,16 +7373,18 @@ sub main() {
                     error "cannot copy to standard output: $!";
                 }
             } else {
-                if (   $options->{format} eq 'squashfs'
-                    or $options->{format} eq 'ext2'
-                    or defined $tar_compressor) {
+                #<<< perltidy 20220613 formatting
+                if (any { $_ eq $options->{format} }
+                    ('squashfs', 'ext2', 'ext4')
+                      or defined $tar_compressor) {
+                #>>>
                     my @argv = ();
                     if ($options->{format} eq 'squashfs') {
                         push @argv, 'tar2sqfs',
                           '--quiet', '--no-skip', '--force',
                           '--exportable',
                           '--compressor', 'xz',
-                          '--block-size', '1048576',
+                          '--block-size', $blocksize,
                           $options->{target};
                     } elsif ($options->{format} eq 'ext2') {
                         if ($numblocks <= 0) {
@@ -6203,6 +7392,26 @@ sub main() {
                         }
                         push @argv, 'genext2fs', '-B', 1024, '-b', $numblocks,
                           '-i', '16384', '-a', '-', $options->{target};
+                    } elsif ($options->{format} eq 'ext4') {
+                        if ($numblocks <= 0) {
+                            error "invalid number of blocks: $numblocks";
+                        }
+                        push @argv, 'mke2fs', '-q', '-F', '-o', 'Linux', '-T',
+                          'ext4';
+                        if (exists $ENV{SOURCE_DATE_EPOCH}) {
+                            # if SOURCE_DATE_EPOCH was set, make the image
+                            # reproducible by setting a fixed uuid and
+                            # hash_seed
+                            my $uuid = create_v5_uuid(
+                                create_v5_uuid(
+                                    $UUID_NS_DNS, "mister-muffin.de"
+                                ),
+                                $mtime
+                            );
+                            push @argv, '-U', $uuid, '-E', "hash_seed=$uuid";
+                        }
+                        push @argv, '-b', $blocksize, '-d', '-',
+                          $options->{target}, $numblocks;
                     } elsif ($options->{format} eq 'tar') {
                         push @argv, @{$tar_compressor};
                     } else {
@@ -6224,8 +7433,8 @@ sub main() {
                           or error "Can't unblock signals: $!";
 
                         # redirect stdout to file or /dev/null
-                        if (   $options->{format} eq 'squashfs'
-                            or $options->{format} eq 'ext2') {
+                        if (any { $_ eq $options->{format} }
+                            ('squashfs', 'ext2', 'ext4')) {
                             open(STDOUT, '>', '/dev/null')
                               or error "cannot open /dev/null for writing: $!";
                         } elsif ($options->{format} eq 'tar') {
@@ -6306,7 +7515,7 @@ sub main() {
     if (any { $_ eq $options->{format} } ('directory')) {
         # nothing to do
     } elsif (any { $_ eq $options->{format} }
-        ('tar', 'squashfs', 'ext2', 'null')) {
+        ('tar', 'squashfs', 'ext2', 'ext4', 'null')) {
         if (!-e $options->{root}) {
             error "$options->{root} does not exist";
         }
@@ -6389,44 +7598,51 @@ B<mmdebstrap> creates a Debian chroot of I<SUITE> into I<TARGET> from one or
 more I<MIRROR>s. It is meant as an alternative to the debootstrap tool (see
 section B<DEBOOTSTRAP>). In contrast to debootstrap it uses apt to resolve
 dependencies and is thus able to use more than one mirror and resolve more
-complex dependencies. See section B<OPERATION> for an overview of how
-B<mmdebstrap> works internally.
+complex dependency relationships. See section B<OPERATION> for an overview of
+how B<mmdebstrap> works internally.
 
-If no I<MIRROR> option is provided and I<SUITE> is not a stable release name,
-L<http://deb.debian.org/debian> is used.  If I<SUITE> is a stable release name
-and no I<MIRROR> is specified, then mirrors for updates and security are
-automatically added. If a I<MIRROR> option starts with "deb " or "deb-src "
-then it is used as a one-line-style format entry for apt's sources.list inside
-the chroot.  If a I<MIRROR> option contains a "://" then it is interpreted as a
-mirror URI and the apt line inside the chroot is assembled as "deb [arch=A] B C
-D" where A is the host's native architecture, B is the I<MIRROR>, C is the
-given I<SUITE> and D is the components given via B<--components> (defaults to
-"main"). If a I<MIRROR> option happens to be an existing file, then its
-contents are pasted into the chroot's sources.list.  This can be used to supply
-a deb822 style sources.list. If I<MIRROR> is C<-> then standard input is pasted
-into the chroot's sources.list.  More than one mirror can be specified and are
-appended to the chroot's sources.list in the given order. If you specify a
-https or tor I<MIRROR> and you want the chroot to be able to update itself,
-don't forget to also install the ca-certificates package, the
-apt-transport-https package for apt versions less than 1.5 and/or the
-apt-transport-tor package using the B<--include> option, as necessary.
-
-The optional I<TARGET> argument can either be the path to a directory, the path
-to a tarball filename, the path to a squashfs image, the path to an ext2 image,
-a FIFO, a character special device, or C<->. Without the B<--format> option,
-I<TARGET> will be used to choose the format. See the section B<FORMATS> for
-more information. If no I<TARGET> was specified or if I<TARGET> is C<->, an
-uncompressed tarball will be sent to standard output.
-
-The I<SUITE> may be a valid release code name (eg, sid, stretch, jessie) or a
-symbolic name (eg, unstable, testing, stable, oldstable). Any suite name that
-works with apt on the given mirror will work. If no I<SUITE> was specified,
-then a single I<MIRROR> C<-> is added and thus the information of the desired
-suite has to come from standard input as part of a valid apt sources.list file.
+The I<SUITE> option may either be a valid release code name (eg, sid, bookworm,
+trixie) or a symbolic name (eg, unstable, testing, stable, oldstable). Any
+suite name that works with apt on the given mirror will work. The I<SUITE>
+option is optional if no I<TARGET> and no I<MIRROR> option is provided.  If
+I<SUITE> is missing, then the information of the desired suite has to come from
+standard input as part of a valid apt sources.list file or be set up via hooks.
 The value of the I<SUITE> argument will be used to determine which apt index to
 use for finding out the set of C<Essential:yes> packages and/or the set of
-packages with the right priority for the selected variant. See the section
+packages with the right priority for the selected variant. This functionality
+can be disabled by choosing the empty string for I<SUITE>. See the section
 B<VARIANTS> for more information.
+
+The I<TARGET> option may either be the path to a directory, the path to a
+tarball filename, the path to a squashfs image, the path to an ext2 or ext4
+image, a FIFO, a character special device, or C<->.  The I<TARGET> option is
+optional if no I<MIRROR> option is provided. If I<TARGET> is missing or if
+I<TARGET> is C<->, an uncompressed tarball will be sent to standard output.
+Without the B<--format> option, I<TARGET> will be used to choose the format.
+See the section B<FORMATS> for more information.
+
+The I<MIRROR> option may either be provided as a URI, in apt one-line format,
+as a path to a file in apt's one-line or deb822-format, or C<->.  If no
+I<MIRROR> option is provided, then L<http://deb.debian.org/debian> is used as
+the default. If I<SUITE> does not refer to "unstable" or "testing", then
+I<SUITE>-updates and I<SUITE>-security mirrors are automatically added. If a
+I<MIRROR> option starts with "deb " or "deb-src " then it is used as a one-line
+format entry for apt's sources.list inside the chroot. If a I<MIRROR> option
+contains a "://" then it is interpreted as a mirror URI and the apt line inside
+the chroot is assembled as "deb [arch=A] B C D" where A is the host's native
+architecture, B is the I<MIRROR>, C is the given I<SUITE> and D is the
+components given via B<--components> (defaults to "main"). If a I<MIRROR>
+option happens to be an existing file, then its contents are written into the
+chroot's sources.list (if the first I<MIRROR> is a file in one-line format) or
+into the chroot's sources.list.d directory, named with the extension .list or
+.sources, depending on whether the file is in one-line or deb822 format,
+respectively.  If I<MIRROR> is C<-> then standard input is pasted into the
+chroot's sources.list.  More than one mirror can be specified and are appended
+to the chroot's sources.list in the given order. If you specify a https or tor
+I<MIRROR> and you want the chroot to be able to update itself, don't forget to
+also install the ca-certificates package, the apt-transport-https package for
+apt versions less than 1.5 and/or the apt-transport-tor package using the
+B<--include> option, as necessary.
 
 All status output is printed to standard error unless B<--logfile> is used to
 redirect it to a file or B<--quiet> or B<--silent> is used to suppress any
@@ -6480,8 +7696,8 @@ information.
 =item B<--format>=I<name>
 
 Choose the output format. Valid format I<name>s are B<auto>, B<directory>,
-B<tar>, B<squashfs>, B<ext2> and B<null>. The default format is B<auto>. See
-the section B<FORMATS> for more information.
+B<tar>, B<squashfs>, B<ext2>, B<ext4> and B<null>. The default format is
+B<auto>. See the section B<FORMATS> for more information.
 
 =item B<--aptopt>=I<option>|I<file>
 
@@ -6525,13 +7741,13 @@ Example: Minimizing the number of packages installed from experimental
 Change the default keyring to use by apt during the initial setup. This is
 similar to setting B<Dir::Etc::Trusted> and B<Dir::Etc::TrustedParts> using
 B<--aptopt> except that the latter setting will be permanently stored in the
-chroot while the keyrings passed via <--keyring> will only be visible to apt as
-run by B<mmdebstrap>. Do not use B<--keyring> if apt inside the chroot needs to
-know about your keys after the initial chroot creation by B<mmdebstrap>. This
-option is mainly intended for users who use B<mmdebstrap> as a B<deboostrap>
-drop-in replacement. As such, it is probably not what you want to use if you
-use B<mmdebstrap> with more than a single mirror unless you pass it a directory
-containing all the keyrings you need.
+chroot while the keyrings passed via B<--keyring> will only be visible to apt
+as run by B<mmdebstrap>. Do not use B<--keyring> if apt inside the chroot needs
+to know about your keys after the initial chroot creation by B<mmdebstrap>.
+This option is mainly intended for users who use B<mmdebstrap> as a
+B<deboostrap> drop-in replacement. As such, it is probably not what you want to
+use if you use B<mmdebstrap> with more than a single mirror unless you pass it
+a directory containing all the keyrings you need.
 
 By default, the local setting of B<Dir::Etc::Trusted> and
 B<Dir::Etc::TrustedParts> are used to choose the keyring used by apt as run by
@@ -6567,7 +7783,7 @@ pointing to F</usr/share/keyrings/ubuntu-archive-keyring.gpg>.
 
 You do not need to use B<--keyring> or C<signed-by> if you placed the keys that
 apt needs to know about into F</etc/apt/trusted.gpg.d> in the B<--setup-hook>
-(which is before C<apt update> runs), for example by using the <copy-in>
+(which is before C<apt update> runs), for example by using the B<copy-in>
 special hook. You also need to copy your keys into the chroot explicitly if the
 key you passed via C<signed-by> points to a location that is not otherwise
 populated during chroot creation (for example by installing a keyring package).
@@ -6603,7 +7819,7 @@ additional packages. Package names are directly passed to apt and thus, you
 can use apt features like C<pkg/suite>, C<pkg=version>, C<pkg->, use a glob or
 regex for C<pkg>, use apt patterns or pass a path to a .deb package file (see
 below for notes concerning passing the path to a .deb package file in
-B<unshare> mode). See apt(8) for the supported syntax.
+B<unshare> mode). See L<apt(8)> for the supported syntax.
 
 The option can be specified multiple times and the packages are concatenated in
 the order in which they are given on the command line. If later list items are
@@ -6867,9 +8083,9 @@ allow unprivileged use of chroot and creation of files that appear to be owned
 by the superuser inside the unshared namespace. A tarball created in this mode
 will be bit-by-bit identical to a tarball created with the B<root> mode. With
 this mode, the only binaries that will run as the root user will be
-B<newuidmap(1)> and B<newgidmap(1)> via their setuid bit. Running those
+L<newuidmap(1)> and L<newgidmap(1)> via their setuid bit. Running those
 successfully requires F</etc/subuid> and F</etc/subgid> to have an entry for
-your username. This entry was usually created by B<adduser(8)> already.
+your username. This entry was usually created by L<adduser(8)> already.
 
 The unshared user will not automatically have access to the same files as you
 do. This is intentional and an additional security against unintended changes
@@ -6879,8 +8095,8 @@ globally readable or writable directories or use special hooks like B<copy-in>
 and B<copy-out>.
 
 Besides the user namespace, the mount, pid (process ids), uts (hostname) and
-ipc namespaces will be unshared as well. See the man pages of B<namespaces(7)>
-and B<unshare(2)> as well as the manual pages they are linking to.
+ipc namespaces will be unshared as well. See the man pages of L<namespaces(7)>
+and L<unshare(2)> as well as the manual pages they are linking to.
 
 A directory chroot created with this mode will end up with wrong ownership
 information (seen from outside the unshared user namespace). For correct
@@ -6894,11 +8110,54 @@ Or without LXC:
 
     $ mmdebstrap --unshare-helper /usr/sbin/chroot ./debian-rootfs /bin/bash
 
-Or, if you don't mind using superuser privileges and have systemd-nspawn
+Or without mmdebstrap:
+
+    $ unshare --map-auto --map-user=65536 --map-group=65536 --keep-caps -- \
+    > /usr/sbin/chroot ./debian-rootfs /bin/bash
+
+The above uses C<--map-auto> to map the block of user/group ids for the
+effective user/group to a block starting at user/group ID 0. We also want to
+map the current effective user/group ID into the subuid/subgid range using
+C<--map-user> and C<--map-group>, respectively. But if that uid/gid overlaps
+with the respective range, a "hole" will be removed from the mapping by the
+L<unshare(1)> utility and the remaining uid/gid values will get shifted. Thus,
+we map the current effective user/group ID to the highest possible uid/gid,
+putting them at the end. Since that means that the user/group will be "nobody"
+and not "root" inside the namespace, C<--keep-caps> propagate permitted
+capabilities into the ambient set and thus give the user C<CAP_DAC_OVERRIDE>
+and other capabilities that it would've had. The following does B<NOT> work:
+
+    $ unshare --map-root-user --map-auto ...            # or equavalient:
+    $ unshare --map-user=0 --map-group=0 --map-users=auto --map-groups=auto ...
+
+Using the format of L<lxc-usernsexec(1)>, these options will result in the
+following mapping:
+
+    0:$UID:1 + 1:$SUBUIDBASE:65535
+
+So a hole is punched in the automatically mapped range at the very beginning to
+make space for the user id of the current user as root inside the namespace and
+the remaining uids are shifted. With C<--map-user=65536> the mapping is as
+follows and places the current user at the end of the range, preventing any
+shifting:
+
+    0:$SUBUIDBASE:65536 + 65536:$UID:1
+
+Lastly, if you don't mind using superuser privileges and have systemd-nspawn
 available and you know your subuid/subgid offset (100000 in this example):
 
     $ sudo systemd-nspawn --private-users=100000 \
     > --directory=./debian-rootfs /bin/bash
+
+A directory created in B<unshare> mode cannot be removed the normal way.
+Instead, use something like this:
+
+    $ unshare --map-root-user --map-auto rm -rf ./debian-rootfs
+
+The above L<unshare(1)> command will map user and group ids into different
+ranges compared to the mapping used by B<mmdebstrap> (effectively shifting them
+one up) but it will provide the required capabilities for the removal
+operation.
 
 If this mode is used as the root user, the user namespace is not unshared (but
 the mount namespace and other still are) and created directories will have
@@ -6916,7 +8175,7 @@ C<fakechroot fakeroot -i fakeroot.env chroot ...>. This mode will not work if
 maintainer scripts are unable to handle C<LD_PRELOAD> correctly like the
 package B<initramfs-tools> until version 0.132. This mode will also not work
 with a different libc inside the chroot than on the outside. See the section
-B<LIMITATIONS> in B<fakechroot(1)>.
+B<LIMITATIONS> in L<fakechroot(1)>.
 
 =item B<chrootless>
 
@@ -6931,10 +8190,13 @@ dpkg-root-support usertag of debian-dpkg@lists.debian.org in the Debian bug
 tracking system. B<WARNING>: if this option is used carelessly with packages
 that do not support C<DPKG_ROOT>, this mode can result in undesired changes to
 the system running B<mmdebstrap> because maintainer-scripts will be run without
-B<chroot(1)>.
+L<chroot(1)>. Make sure to run this mode without superuser privileges and/or
+inside a throw-away chroot environment like so:
 
-=for TODO
-=item B<qemu>
+    mmdebstrap --variant=apt --include=mmdebstrap \
+        --customize-hook='chroot "$1" mmdebstrap --mode=chrootless
+                          --variant=apt unstable chrootless.tar' \
+        --customize-hook='copy-out chrootless.tar .' unstable /dev/null
 
 =back
 
@@ -6965,32 +8227,30 @@ then this variant will fail because it cannot configure the packages.
 
 =item B<essential>
 
-C<Essential:yes> packages.
+C<Essential:yes> packages. If I<SUITE> is a non-empty string, then only
+packages from the archive with suite or codename matching I<SUITE> will be
+considered for selection of C<Essential:yes> packages.
 
 =item B<apt>
 
-The B<essential> set plus apt. This variant uses the fact that B<apt> treats
-itself as essential and thus running C<apt-get dist-upgrade> without any
-packages installed will install the B<essential> set plus B<apt>. If you just
-want B<essential> and B<apt>, then this variant is faster than using the
-B<essential> variant and adding B<apt> via C<--include> because all packages
-get installed at once. The downside of this variant is, that if it should
-happen that an B<essential> package is not installable, then it will just get
-ignored without throwing an error.
-
-=item B<required>, B<minbase>
-
-The B<essential> set plus all packages with Priority:required and apt.
+The B<essential> set plus apt.
 It is roughly equivalent to running mmdebstrap with
 
-    --variant=essential --include="?priority(required)"
+    --variant=essential --include="apt"
 
 =item B<buildd>
 
-The B<minbase> set plus build-essential.
+The B<essential> set plus apt and build-essential.
 It is roughly equivalent to running mmdebstrap with
 
-    --variant=essential --include="?priority(required),build-essential"
+    --variant=essential --include="apt,build-essential"
+
+=item B<required>, B<minbase>
+
+The B<essential> set plus all packages with Priority:required.
+It is roughly equivalent to running mmdebstrap with
+
+    --variant=essential --include="?priority(required)"
 
 =item B<important>, B<debootstrap>, B<->
 
@@ -7027,7 +8287,8 @@ of the filename extensions listed in the section B<COMPRESSION>, or if
 I<TARGET> equals C<->, or if I<TARGET> is a named pipe (fifo) or if I<TARGET>
 is a character special file, then the B<tar> format will be chosen. If
 I<TARGET> ends with C<.squashfs> or C<.sqfs>, then the B<squashfs> format will
-be chosen. If <TARGET> ends with C<.ext2> then the B<ext2> format will be
+be chosen. If I<TARGET> ends with C<.ext2> then the B<ext2> format will be
+chosen. If I<TARGET> ends with C<.ext4> then the B<ext4> format will be
 chosen. If none of these conditions apply, the B<directory> format will be
 chosen.
 
@@ -7077,8 +8338,24 @@ with this format because C<genext2fs> can only write to a regular file. If you
 need your ext2 image be named C<->, then just explicitly pass the relative path
 to it like F<./->. To convert the result to an ext3 image, use C<tune2fs -O
 has_journal TARGET> and to convert it to ext4, use C<tune2fs -O
-extents,uninit_bg,dir_index,has_journal TARGET>. Since C<genext2fs> does not
-support extended attributes, the resulting image will not contain them.
+extents,uninit_bg,dir_index,has_journal TARGET>.
+
+B<CAUTION>: the ext2 format does not support timestamps beyond 2038 January 19,
+does not support sub-second precision timestamps and does not support extended
+attributes. Its inode size of 128 prevents adding these features with tune2fs
+later on.
+
+=item B<ext4>
+
+A temporary chroot directory will be created in C<$TMPDIR> or F</tmp> if
+C<$TMPDIR> is not set. A tarball of that directory will be piped to the
+C<mke2fs> utility, which will create an ext4 image that will be approximately
+90% full in I<TARGET>. The special I<TARGET> C<-> does not work with this
+format because C<mke2fs> can only write to a regular file. If you need your
+ext4 image be named C<->, then just explicitly pass the relative path to it
+like F<./->.  If C<SOURCE_DATE_EPOCH> is set, the filesystem UUID and hash_seed
+will be set to a UUID derived from SOURCE_DATE_EPOCH to create reproducible
+images.
 
 =item B<null>
 
@@ -7107,14 +8384,16 @@ hook. Otherwise, if I<command> is an existing executable file from C<$PATH> or
 if I<command> does not contain any shell metacharacters, then I<command> is
 directly exec-ed with the path to the chroot directory passed as the first
 argument. Otherwise, I<command> is executed under I<sh> and the chroot
-directory can be accessed via I<$1>. Most environment variables set by
-B<mmdebstrap> (like C<DEBIAN_FRONTEND>, C<LC_ALL> and C<PATH>) are preserved.
-Most notably, C<APT_CONFIG> is being unset. If you need the path to
-C<APT_CONFIG> as written by mmdebstrap it can be found in the
-C<MMDEBSTRAP_APT_CONFIG> environment variable. All environment variables set by
-the user are preserved, except for C<TMPDIR> which is cleared. See section
-B<TMPDIR>. Furthermore, C<MMDEBSTRAP_MODE> will store the mode set by
-B<--mode>, C<MMDEBSTRAP_FORMAT> stores the format chosen by B<--format>,
+directory can be accessed via I<$1>. Background (daemon) processes spawned in
+a hook are not guaranteed to persist beyond the hook that created them.
+
+Most environment variables set by B<mmdebstrap> (like C<DEBIAN_FRONTEND>,
+C<LC_ALL> and C<PATH>) are preserved.  Most notably, C<APT_CONFIG> is being
+unset. If you need the path to C<APT_CONFIG> as written by mmdebstrap it can be
+found in the C<MMDEBSTRAP_APT_CONFIG> environment variable. All environment
+variables set by the user are preserved, except for C<TMPDIR> which is cleared.
+See section B<TMPDIR>. Furthermore, C<MMDEBSTRAP_MODE> will store the mode set
+by B<--mode>, C<MMDEBSTRAP_FORMAT> stores the format chosen by B<--format>,
 C<MMDEBSTRAP_HOOK> stores which hook is currently run (setup, extract,
 essential, customize), C<MMDEBSTRAP_ARGV0> stores the name of the binary with
 which B<mmdebstrap> was executed and C<MMDEBSTRAP_VERBOSITY> stores the
@@ -7175,7 +8454,12 @@ B<--skip=tar-in/mknod>.
 =item B<tar-out> I<pathinside> I<outside.tar>
 
 Packs the path I<pathinside> from inside the chroot into a tarball, placing it
-into a certain location I<outside.tar> outside the chroot.
+into a certain location I<outside.tar> outside the chroot. To emulate behaviour
+of C<cp> and to provide control over the path which gets put into the tarball,
+a C<chdir()> is performed to the C<dirname()> of I<pathinside> and then the
+C<basename()> of I<pathinside> is packaged as a tarball. For example, if
+I<pathinside> is C</boot/.> then first a C<chdir()> into C</boot> will be
+performed before packing up the contents of C<.> inside C</boot>.
 
 =item B<download> I<fileinside> I<fileoutside>
 
@@ -7210,8 +8494,8 @@ its core, what B<mmdebstrap> does can be put into a 14 line shell script:
     Apt::Architecture "$(dpkg --print-architecture)";
     Apt::Architectures "$(dpkg --print-architecture)";
     Dir "$(cd "$2" && pwd)";
-    Dir::Etc::Trusted "$(eval "$(apt-config shell v Dir::Etc::Trusted/f)"; printf "$v")";
-    Dir::Etc::TrustedParts "$(eval "$(apt-config shell v Dir::Etc::TrustedParts/d)"; printf "$v")";
+    Dir::Etc::Trusted "$(eval "$(apt-config shell v Dir::Etc::Trusted/f)"; printf %s "$v")";
+    Dir::Etc::TrustedParts "$(eval "$(apt-config shell v Dir::Etc::TrustedParts/d)"; printf %s "$v")";
     END
     echo "deb http://deb.debian.org/debian/ $1 main" > "$2/etc/apt/sources.list"
     APT_CONFIG="$2/apt.conf" apt-get update
@@ -7236,6 +8520,8 @@ Upon startup, several checks are carried out, like:
 =item * whether required utilities (apt, dpkg, tar) are installed
 
 =item * which mode to use and whether prerequisites are met
+
+=item * do not allow chrootless mode as root (without fakeroot) unless inside a chroot. This check can be disabled using B<--skip=check/chrootless>
 
 =item * whether the requested architecture can be executed (requires arch-test) using qemu binfmt_misc support. This requires arch-test and can be disabled using B<--skip=check/qemu>
 
@@ -7281,15 +8567,11 @@ the B<setup> step. This can be disabled using B<--skip=update>.
 =item B<download>
 
 In the B<extract> and B<custom> variants, C<apt-get install> is used to
-download all the packages requested via the B<--include> option. The B<apt>
-variant uses the fact that libapt treats the C<apt> packages as implicitly
-essential to download only all C<Essential:yes> packages plus apt using
-C<apt-get dist-upgrade>. In the remaining variants, all Packages files
-downloaded by the B<update> step are inspected to find the C<Essential:yes>
-package set as well as all packages of the required priority. If I<SUITE> is a
-non-empty string, then only packages from the archive with suite or codename
-matching I<SUITE> will be considered for selection of C<Essential:yes>
-packages.
+download all the packages requested via the B<--include> option. In the
+remaining variants, apt patterns are used to find the C<Essential:yes> packages
+from the native architecture.  If I<SUITE> is a non-empty string, then only
+packages from the archive with suite or codename matching I<SUITE> will be
+considered for selection of C<Essential:yes> packages.
 
 =item B<mount>
 
@@ -7298,7 +8580,7 @@ them afterwards. This can be disabled using B<--skip=chroot/mount> or
 specifically by B<--skip=chroot/mount/dev>, B<--skip=chroot/mount/proc> and
 B<--skip=chroot/mount/sys>, respectively. B<mmdebstrap> will disable running
 services by temporarily moving F</usr/sbin/policy-rc.d> and
-F</sbin/start-stop-daemon> if they exist. This can be disabled with
+F</usr/sbin/start-stop-daemon> if they exist. This can be disabled with
 B<--skip=chroot/policy-rc.d> and B<--skip=chroot/start-stop-daemon>,
 respectively.
 
@@ -7309,8 +8591,7 @@ Extract the downloaded packages into the rootfs.
 =item B<prepare>
 
 In B<fakechroot> mode, environment variables C<LD_LIBRARY_PATH> will be set up
-correctly. If the chroot requires the qemu-user-static binary it will be copied
-in. For foreign B<fakechroot> environments, C<LD_LIBRARY_PATH> and
+correctly. For foreign B<fakechroot> environments, C<LD_LIBRARY_PATH> and
 C<QEMU_LD_PREFIX> are set up accordingly. This step is not carried out in
 B<extract> mode and neither for the B<chrootless> variant.
 
@@ -7345,7 +8626,12 @@ This step is not carried out in B<extract> mode.
 =item B<unmount>
 
 Unmount everything that was mounted during the B<mount> stage and restores
-F</usr/sbin/policy-rc.d> and F</sbin/start-stop-daemon> if necessary.
+F</usr/sbin/policy-rc.d> and F</usr/sbin/start-stop-daemon> if necessary.
+
+=item B<zombie-reaping>
+
+Wait for (reap) still running processes (background processes or zombie
+processes), unless B<--skip=zombie-reaping> is used.
 
 =item B<cleanup>
 
@@ -7355,7 +8641,7 @@ Performs cleanup tasks, unless B<--skip=cleanup> is used:
 
 =item * Removes the package lists (unless B<--skip=cleanup/apt/lists>) and apt cache (unless B<--skip=cleanup/apt/cache>). Both removals can be disabled by using B<--skip=cleanup/apt>.
 
-=item * Remove all files that were put into the chroot for setup purposes, like F</etc/apt/apt.conf.d/00mmdebstrap>, the temporary apt config and the qemu-user-static binary. This can be disabled using B<--skip=cleanup/mmdebstrap>.
+=item * Remove all files that were put into the chroot for setup purposes, like F</etc/apt/apt.conf.d/00mmdebstrap> and the temporary apt config. This can be disabled using B<--skip=cleanup/mmdebstrap>.
 
 =item * Remove files that make the result unreproducible and write the empty string to /etc/machine-id if it exists. This can be disabled using B<--skip=cleanup/reproducible>. Note that this will not remove files that make the result unreproducible on machines with differing F</etc/resolv.conf> or F</etc/hostname>. Use a B<--customize-hook> to make those two files reproducible across multiple hosts. See section C<SOURCE_DATE_EPOCH> for more information. The following files will be removed:
 
@@ -7386,8 +8672,8 @@ Performs cleanup tasks, unless B<--skip=cleanup> is used:
 =item B<output>
 
 For formats other than B<directory>, pack up the temporary chroot directory
-into a tarball, ext2 image or squashfs image and delete the temporary chroot
-directory.
+into a tarball, ext2 image, ext4 image or squashfs image and delete the
+temporary chroot directory.
 
 If B<--skip=output/dev> is added, the resulting chroot will not contain the
 device nodes, directories and symlinks that B<debootstrap> creates but just
@@ -7425,6 +8711,16 @@ create device nodes:
 Create a tarball for use with C<sbuild --chroot-mode=unshare>:
 
     $ mmdebstrap --variant=buildd unstable ~/.cache/sbuild/unstable-amd64.tar
+
+Create a buildd tarball for EOL distro:
+
+    $ mmdebstrap --include=apt --variant=buildd --aptopt \
+        'Apt::Key::gpgvcommand "/usr/libexec/mmdebstrap/gpgvnoexpkeysig"' \
+        --aptopt='Acquire::Check-Valid-Until "false"' \
+        --keyring=/usr/share/keyrings/debian-archive-removed-keys.gpg \
+        --hook-dir=/usr/share/mmdebstrap/hooks/maybe-jessie-or-older \
+        jessie ~/.cache/sbuild/jessie-arm64.tar \
+        http://archive.debian.org/debian
 
 Instead of a tarball, a squashfs image can be created:
 
@@ -7473,7 +8769,7 @@ translated manual packages (but not the untranslated ones), and documentation
 Create a bootable USB Stick that boots into a full Debian desktop:
 
     $ mmdebstrap --aptopt='Apt::Install-Recommends "true"' --customize-hook \
-        'chroot "$1" adduser --gecos user --disabled-password user' \
+        'chroot "$1" adduser --comment user --disabled-password user' \
         --customize-hook='echo 'user:live' | chroot "$1" chpasswd' \
         --customize-hook='echo host > "$1/etc/hostname"' \
         --customize-hook='echo "127.0.0.1 localhost host" > "$1/etc/hosts"' \
@@ -7722,7 +9018,7 @@ Limitations in comparison to debootstrap:
 =item * Some debootstrap options don't exist, namely:
 
 I<--second-stage>, I<--exclude>, I<--resolve-deps>, I<--force-check-gpg>,
-I<--merged-usr> and I<--no-merged-usr>
+I<--merged-usr>, I<--no-merged-usr> and I<--cache-dir>.
 
 =back
 
@@ -7838,7 +9134,7 @@ update" as an error.
 
 =head1 SEE ALSO
 
-    debootstrap(8), debvm(1), bdebstrap(1)
+L<debootstrap(8)>, L<debvm(1)>, L<bdebstrap(1)>
 
 =cut
 

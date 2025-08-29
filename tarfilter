@@ -218,8 +218,11 @@ Lastly, shift user id and group id of each entry by the value given by the
         skip = False
         if not hasattr(args, "pathfilter"):
             return False
+        # normalize path and make it absolute by stripping off all leading
+        # dots and slashes and then prepending a slash
+        name = "/" + member.name.lstrip("./")
         for t, r in args.pathfilter:
-            if r.match(member.name[1:]) is not None:
+            if r.match(name) is not None:
                 if t == "path_include":
                     skip = False
                 else:
@@ -230,7 +233,7 @@ Lastly, shift user id and group id of each entry by the value given by the
                     continue
                 prefix = prefix_prog.sub(r"\1", r.pattern)
                 prefix = prefix.rstrip("/")
-                if member.name[1:].startswith(prefix):
+                if name.startswith(prefix):
                     return False
         return skip
 

@@ -2,13 +2,14 @@
 set -eu
 export LC_ALL=C.UTF-8
 if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test modifies the system and should only be run inside a container" >&2
-	exit 1
+  echo "this test modifies the system and should only be run inside a container" >&2
+  exit 1
 fi
 trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
 rm /etc/resolv.conf /etc/hostname
 {{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
-{ tar -tf /tmp/debian-chroot.tar;
-  printf "./etc/hostname\n";
-  printf "./etc/resolv.conf\n";
+{
+  tar -tf /tmp/debian-chroot.tar
+  printf "./etc/hostname\n"
+  printf "./etc/resolv.conf\n"
 } | sort | diff -u tar1.txt -

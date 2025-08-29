@@ -6,11 +6,23 @@ mkdir /tmp/root
 ln -s /real /tmp/root/link
 mkdir /tmp/root/real
 run_testA() {
-  echo content > /tmp/foo
+  echo content >/tmp/foo
   # shellcheck disable=SC2094
-  { { { {{ CMD }} --hook-helper /tmp/root root setup '' 1 upload /tmp/foo "$1" < /tmp/myfifo 3>&-; echo $? >&3; printf "\\000\\000adios";
-      } | {{ CMD }} --hook-listener 1 3>&- >/tmp/myfifo; echo $?; } 3>&1;
-  } | { read -r xs1; [ "$xs1" -eq 0 ]; read -r xs2; [ "$xs2" -eq 0 ]; }
+  {
+    {
+      {
+        {{ CMD }} --hook-helper /tmp/root root setup '' 1 upload /tmp/foo "$1" </tmp/myfifo 3>&-
+        echo $? >&3
+        printf '\000\000adios'
+      } | {{ CMD }} --hook-listener 1 3>&- >/tmp/myfifo
+      echo $?
+    } 3>&1
+  } | {
+    read -r xs1
+    [ "$xs1" -eq 0 ]
+    read -r xs2
+    [ "$xs2" -eq 0 ]
+  }
   echo content | diff -u - /tmp/root/real/foo
   rm /tmp/foo
   rm /tmp/root/real/foo

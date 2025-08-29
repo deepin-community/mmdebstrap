@@ -6,27 +6,27 @@ export LC_ALL=C.UTF-8
 [ {{ MODE }} = "unshare" ]
 
 if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-	if [ ! -e /mmdebstrap-testenv ]; then
-		echo "this test modifies the system and should only be run inside a container" >&2
-		exit 1
-	fi
-	useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  if [ ! -e /mmdebstrap-testenv ]; then
+    echo "this test modifies the system and should only be run inside a container" >&2
+    exit 1
+  fi
+  useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
 fi
 prefix="runuser -u ${SUDO_USER:-user} --"
 
 # https://www.etalabs.net/sh_tricks.html
-quote () { printf %s\\n "$1" | sed "s/'/'\\\\''/g;1s/^/'/;\$s/\$/'/" ; }
+quote() { printf %s\\n "$1" | sed "s/'/'\\\\''/g;1s/^/'/;\$s/\$/'/"; }
 homedir=$($prefix sh -c 'cd && pwd')
 # apt:test/integration/test-apt-key
-TMPDIR_ADD="This is fü\$\$ing cràzy, \$(apt -v)\$!"
+TMPDIR_ADD='This is fü$$ing cràzy, $(apt -v)$!'
 $prefix mkdir "$homedir/$TMPDIR_ADD"
 # make sure the unshared user can traverse into the TMPDIR
 chmod 711 "$homedir"
 # set permissions and sticky bit like the real /tmp
 chmod 1777 "$homedir/$TMPDIR_ADD"
 $prefix env TMPDIR="$homedir/$TMPDIR_ADD" {{ CMD }} --mode={{ MODE }} --variant=apt \
-	--setup-hook='case "$1" in '"$(quote "$homedir/$TMPDIR_ADD/mmdebstrap.")"'??????????) exit 0;; *) echo "$1"; exit 1;; esac' \
-	 {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+  --setup-hook='case "$1" in '"$(quote "$homedir/$TMPDIR_ADD/mmdebstrap.")"'??????????) exit 0;; *) echo "$1"; exit 1;; esac' \
+  {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -
 # use rmdir as a quick check that nothing is remaining in TMPDIR
 $prefix rmdir "$homedir/$TMPDIR_ADD"

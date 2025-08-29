@@ -157,16 +157,21 @@ Contributors
 ============
 
  - Johannes Schauer Marin Rodrigues (main author)
+ - Jochen Sprickerhof
  - Helmut Grohne
  - Gioele Barabucci
  - Benjamin Drung
- - Jochen Sprickerhof
  - Josh Triplett
  - Konstantin Demin
+ - Charles Short
+ - Chris Hofstaedtler
+ - Colin Watson
  - David Kalnischkies
  - Emilio Pozuelo Monfort
+ - Francesco Poli
  - Jakub Wilk
  - Joe Groocock
+ - Max-Julian Pogner
  - Nicolas Vigier
  - Raul Tambre
  - Steve Dodd

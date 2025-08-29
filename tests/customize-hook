@@ -2,7 +2,7 @@
 set -eu
 export LC_ALL=C.UTF-8
 trap "rm -rf /tmp/debian-chroot; rm -f /tmp/customize.sh" EXIT INT TERM
-cat << 'SCRIPT' > /tmp/customize.sh
+cat <<'SCRIPT' >/tmp/customize.sh
 #!/bin/sh
 chroot "$1" whoami > "$1/output2"
 chroot "$1" pwd >> "$1/output2"

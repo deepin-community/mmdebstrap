@@ -7,11 +7,9 @@ trap "rm -f /tmp/debian-chroot.tar" EXIT INT TERM
 
 # we use variant standard in verbose mode to see the maximum number of packages
 # that was chosen in case of USE_HOST_APT_CONFIG=yes
-# we use variant important on arches where variant standard is not bit-by-bit
-# reproducible due to #1031276
-case {{ VARIANT }} in standard|-) : ;; *) exit 1;; esac
+case {{ VARIANT }} in standard) : ;; *) exit 1 ;; esac
 
 {{ CMD }} --variant={{ VARIANT }} --verbose {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 
 cmp ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.tar /tmp/debian-chroot.tar \
-	|| diffoscope ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.tar /tmp/debian-chroot.tar
+  || diffoscope ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.tar /tmp/debian-chroot.tar

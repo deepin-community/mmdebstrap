@@ -7,23 +7,37 @@ export LC_ALL=C.UTF-8
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
-$prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} --architectures=arm64 --include=libmagic-mgc {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+case "$(dpkg --print-architecture)" in
+  arm64)
+    foreign_arch=amd64
+    ;;
+  amd64)
+    foreign_arch=arm64
+    ;;
+  *)
+    echo "unsupported native architecture" >&2
+    exit 1
+    ;;
+esac
+
+$prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} --architectures="$foreign_arch" --include=libmagic-mgc {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
 # delete contents of libmagic-mgc
 rm /tmp/debian-chroot/usr/lib/file/magic.mgc
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/README.Debian
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/changelog.Debian.gz
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/changelog.gz
 rm /tmp/debian-chroot/usr/share/doc/libmagic-mgc/copyright
+rm -f /tmp/debian-chroot/usr/share/doc/libmagic-mgc/"changelog.Debian.$foreign_arch.gz"
 rm /tmp/debian-chroot/usr/share/file/magic.mgc
 rm /tmp/debian-chroot/usr/share/misc/magic.mgc
 # delete real files

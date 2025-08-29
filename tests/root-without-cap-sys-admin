@@ -4,14 +4,14 @@ export LC_ALL=C.UTF-8
 [ "$(whoami)" = "root" ]
 
 if grep --null-data --quiet --no-messages '^container=lxc$' /proc/1/environ; then
-	# see https://stackoverflow.com/questions/65748254/
-	echo "cannot run under lxc -- Skipping test..." >&2
-	exit 0
+  # see https://stackoverflow.com/questions/65748254/
+  echo "cannot run under lxc -- Skipping test..." >&2
+  exit 0
 fi
 
 capsh --drop=cap_sys_admin -- -c 'exec "$@"' exec \
-	{{ CMD }} --mode=root --variant=apt \
-	--customize-hook='chroot "$1" sh -c "test ! -e /proc/self/fd"' \
-	{{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
+  {{ CMD }} --mode=root --variant=apt \
+  --customize-hook='chroot "$1" sh -c "test ! -e /proc/self/fd"' \
+  {{ DIST }} /tmp/debian-chroot.tar {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -
 rm /tmp/debian-chroot.tar

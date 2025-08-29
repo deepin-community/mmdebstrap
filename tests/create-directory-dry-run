@@ -2,10 +2,10 @@
 set -eu
 export LC_ALL=C.UTF-8
 {{ CMD }} --mode={{ MODE }} --dry-run --variant=apt \
-	--setup-hook="exit 1" \
-	--essential-hook="exit 1" \
-	--customize-hook="exit 1" \
-	{{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+  --setup-hook="exit 1" \
+  --essential-hook="exit 1" \
+  --customize-hook="exit 1" \
+  {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
 rm /tmp/debian-chroot/dev/console
 rm /tmp/debian-chroot/dev/fd
 rm /tmp/debian-chroot/dev/full

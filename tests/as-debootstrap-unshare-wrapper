@@ -5,14 +5,14 @@ export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
 # debootstrap uses apt-config to figure out whether the system running it has
@@ -28,18 +28,21 @@ fi
 # https://bugs.debian.org/1031105
 # https://salsa.debian.org/installer-team/debootstrap/-/merge_requests/90
 AUTOPROXY=
-eval "$(apt-config shell AUTOPROXY Acquire::http::Proxy-Auto-Detect)"
-if [ -n "$AUTOPROXY" ] && [ -x "$AUTOPROXY" ] && [ -e /tmp/.auto-apt-proxy-0 ]; then
-	TMP_APT_CONFIG=$(mktemp)
-	echo "Dir \"/dev/null\";" > "$TMP_APT_CONFIG"
-	chmod 644 "$TMP_APT_CONFIG"
+# allow an empty http_proxy variable to disable this
+if [ -n "${http_proxy-}" ]; then
+  eval "$(apt-config shell AUTOPROXY Acquire::http::Proxy-Auto-Detect)"
+  if [ -n "$AUTOPROXY" ] && [ -x "$AUTOPROXY" ] && [ -e /tmp/.auto-apt-proxy-0 ]; then
+    TMP_APT_CONFIG=$(mktemp)
+    echo 'Dir "/dev/null";' >"$TMP_APT_CONFIG"
+    chmod 644 "$TMP_APT_CONFIG"
+  fi
 fi
 
 $prefix {{ CMD }} --variant=custom --mode={{ MODE }} \
-	--setup-hook='env '"${AUTOPROXY:+APT_CONFIG='$TMP_APT_CONFIG'}"' debootstrap --variant={{ VARIANT }} unstable "$1" {{ MIRROR }}' \
-	- /tmp/debian-mm.tar {{ MIRROR }}
+  --setup-hook='env '"${AUTOPROXY:+APT_CONFIG='$TMP_APT_CONFIG'}"' debootstrap --variant={{ VARIANT }} unstable "$1" {{ MIRROR }}' \
+  - /tmp/debian-mm.tar {{ MIRROR }}
 if [ -n "$AUTOPROXY" ] && [ -x "$AUTOPROXY" ] && [ -e /tmp/.auto-apt-proxy-0 ]; then
-	rm "$TMP_APT_CONFIG"
+  rm "$TMP_APT_CONFIG"
 fi
 
 mkdir /tmp/debian-mm
@@ -62,21 +65,21 @@ rm /tmp/debian-debootstrap/var/cache/apt/archives/*.deb
 rm /tmp/debian-debootstrap/var/cache/ldconfig/aux-cache
 # remove logs
 rm /tmp/debian-debootstrap/var/log/dpkg.log \
-	/tmp/debian-debootstrap/var/log/bootstrap.log \
-	/tmp/debian-debootstrap/var/log/alternatives.log \
-	/tmp/debian-mm/var/log/bootstrap.log
+  /tmp/debian-debootstrap/var/log/bootstrap.log \
+  /tmp/debian-debootstrap/var/log/alternatives.log \
+  /tmp/debian-mm/var/log/bootstrap.log
 
 # clear out /run except for /run/lock
 find /tmp/debian-debootstrap/run/ -mindepth 1 -maxdepth 1 ! -name lock -print0 | xargs --no-run-if-empty -0 rm -r
 
 # debootstrap doesn't clean apt
 rm /tmp/debian-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_unstable_main_binary-{{ HOSTARCH }}_Packages \
-	/tmp/debian-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_unstable_InRelease \
-	/tmp/debian-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_unstable_Release \
-	/tmp/debian-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_unstable_Release.gpg
+  /tmp/debian-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_unstable_InRelease \
+  /tmp/debian-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_unstable_Release \
+  /tmp/debian-debootstrap/var/lib/apt/lists/127.0.0.1_debian_dists_unstable_Release.gpg
 
 if [ -e /tmp/debian-debootstrap/etc/machine-id ]; then
-	rm /tmp/debian-debootstrap/etc/machine-id /tmp/debian-mm/etc/machine-id
+  rm /tmp/debian-debootstrap/etc/machine-id /tmp/debian-mm/etc/machine-id
 fi
 rm /tmp/debian-mm/var/cache/apt/archives/lock
 rm /tmp/debian-mm/var/lib/apt/lists/lock
@@ -85,24 +88,24 @@ rm /tmp/debian-mm/var/lib/dpkg/arch
 # also needed for users that are created by systemd-sysusers before systemd 252
 # https://github.com/systemd/systemd/pull/24534
 for f in shadow shadow-; do
-	if [ ! -e /tmp/debian-debootstrap/etc/$f ]; then
-		continue
-	fi
-	if ! cmp /tmp/debian-debootstrap/etc/$f /tmp/debian-mm/etc/$f >&2; then
-		echo patching /etc/$f >&2
-		awk -v FS=: -v OFS=: -v SDE={{ SOURCE_DATE_EPOCH }} '{ print $1,$2,int(SDE/60/60/24),$4,$5,$6,$7,$8,$9 }' < /tmp/debian-mm/etc/$f > /tmp/debian-mm/etc/$f.bak
-		cat /tmp/debian-mm/etc/$f.bak > /tmp/debian-mm/etc/$f
-		rm /tmp/debian-mm/etc/$f.bak
-	else
-		echo no difference for /etc/$f >&2
-	fi
+  if [ ! -e /tmp/debian-debootstrap/etc/$f ]; then
+    continue
+  fi
+  if ! cmp /tmp/debian-debootstrap/etc/$f /tmp/debian-mm/etc/$f >&2; then
+    echo patching /etc/$f >&2
+    awk -v FS=: -v OFS=: -v SDE={{ SOURCE_DATE_EPOCH }} '{ print $1,$2,int(SDE/60/60/24),$4,$5,$6,$7,$8,$9 }' </tmp/debian-mm/etc/$f >/tmp/debian-mm/etc/$f.bak
+    cat /tmp/debian-mm/etc/$f.bak >/tmp/debian-mm/etc/$f
+    rm /tmp/debian-mm/etc/$f.bak
+  else
+    echo no difference for /etc/$f >&2
+  fi
 done
 
 # isc-dhcp-client postinst doesn't create this file in debootstrap run with
 # unshared wrapper. The responsible postinst snippet was automatically added
 # by dh_apparmor since isc-dhcp-client 4.4.3-P1-1.1
 if [ -e /tmp/debian-debootstrap/etc/apparmor.d/local/sbin.dhclient ] && [ ! -s /tmp/debian-debootstrap/etc/apparmor.d/local/sbin.dhclient ]; then
-	echo /sbin/setcap > /tmp/debian-debootstrap/etc/apparmor.d/local/sbin.dhclient
+  echo /sbin/setcap >/tmp/debian-debootstrap/etc/apparmor.d/local/sbin.dhclient
 fi
 
 # check if the file content differs
@@ -111,17 +114,17 @@ diff --unified --no-dereference --recursive /tmp/debian-debootstrap /tmp/debian-
 # check permissions, ownership, symlink targets, modification times using tar
 # mtimes of directories created by mmdebstrap will differ, thus we equalize them first
 for d in etc/apt/preferences.d/ etc/apt/sources.list.d/ etc/dpkg/dpkg.cfg.d/ var/log/apt/; do
-	touch --date="@{{ SOURCE_DATE_EPOCH }}" /tmp/debian-debootstrap/$d /tmp/debian-mm/$d
+  touch --date="@{{ SOURCE_DATE_EPOCH }}" /tmp/debian-debootstrap/$d /tmp/debian-mm/$d
 done
 # debootstrap never ran apt -- fixing permissions
 for d in ./var/lib/apt/lists/partial ./var/cache/apt/archives/partial; do
-	chroot /tmp/debian-debootstrap chmod 0700 $d
-	chroot /tmp/debian-debootstrap chown _apt:root $d
+  chroot /tmp/debian-debootstrap chmod 0700 $d
+  chroot /tmp/debian-debootstrap chown _apt:root $d
 done
 tar -C /tmp/debian-debootstrap --numeric-owner --xattrs --xattrs-include='*' --sort=name --clamp-mtime --mtime="$(date --utc --date=@{{ SOURCE_DATE_EPOCH }} --iso-8601=seconds)" -cf /tmp/root1.tar .
 tar -C /tmp/debian-mm --numeric-owner --xattrs --xattrs-include='*' --sort=name --clamp-mtime --mtime="$(date --utc --date=@{{ SOURCE_DATE_EPOCH }} --iso-8601=seconds)" -cf /tmp/root2.tar .
-tar --full-time --verbose -tf /tmp/root1.tar > /tmp/root1.tar.list
-tar --full-time --verbose -tf /tmp/root2.tar > /tmp/root2.tar.list
+tar --full-time --verbose -tf /tmp/root1.tar >/tmp/root1.tar.list
+tar --full-time --verbose -tf /tmp/root2.tar >/tmp/root2.tar.list
 # despite SOURCE_DATE_EPOCH and --clamp-mtime, the timestamps in the tarball
 # will slightly differ from each other in the sub-second precision (last
 # decimals) so the tarballs will not be identical, so we use diff to compare

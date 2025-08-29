@@ -9,7 +9,7 @@ set -eu
 export LC_ALL=C.UTF-8
 [ "$(whoami)" = "root" ]
 trap "rm -f /tmp/debian-chroot.tar script.sh" EXIT INT TERM
-cat << 'SCRIPT' > script.sh
+cat <<'SCRIPT' >script.sh
 #!/bin/sh
 set -eu
 rootfs="$1"
@@ -22,7 +22,7 @@ chroot "$rootfs" env --chdir=/mnt \
 SCRIPT
 chmod +x script.sh
 {{ CMD }} --mode=root --variant=apt --include=perl,mount \
-	--customize-hook=./script.sh \
-	--customize-hook="download /tmp/debian-chroot.tar /tmp/debian-chroot.tar" \
-	{{ DIST }} /dev/null {{ MIRROR }}
+  --customize-hook=./script.sh \
+  --customize-hook="download /tmp/debian-chroot.tar /tmp/debian-chroot.tar" \
+  {{ DIST }} /dev/null {{ MIRROR }}
 tar -tf /tmp/debian-chroot.tar | sort | diff -u tar1.txt -

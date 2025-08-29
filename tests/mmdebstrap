@@ -5,16 +5,27 @@ export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
 
 [ "$(id -u)" -eq 0 ]
 [ {{ MODE }} = "root" ]
-case {{ FORMAT }} in tar|squashfs|ext2) : ;; *) exit 1;; esac
+case {{ FORMAT }} in tar | squashfs | ext2 | ext4) : ;; *) exit 1 ;; esac
 
-{{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} {{ DIST }} ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }} {{ MIRROR }}
+{{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} {{ DIST }} /tmp/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }} {{ MIRROR }}
+# creating an ext4 image on a 9p filesystem produces different results compared
+# to creating it on a tmpfs or ext4 fs because 9p does not support discards and
+# even when running with -E nodiscard, the number of written bytes will differ
+# https://lore.kernel.org/linux-ext4/171484520952.2626447.2160419274451668597@localhost/T/#t
+mv /tmp/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }} ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.{{ FORMAT }}
 if [ "{{ FORMAT }}" = tar ]; then
-	printf 'ustar ' | cmp --bytes=6 --ignore-initial=257:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.tar -
+  printf 'ustar\0' | cmp --bytes=6 --ignore-initial=257:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.tar -
 elif [ "{{ FORMAT }}" = squashfs ]; then
-	printf 'hsqs' | cmp --bytes=4 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.squashfs -
+  printf 'hsqs' | cmp --bytes=4 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.squashfs -
 elif [ "{{ FORMAT }}" = ext2 ]; then
-	printf '\123\357' | cmp --bytes=2 --ignore-initial=1080:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.ext2 -
+  printf '\123\357' | cmp --bytes=2 --ignore-initial=1080:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.ext2 -
+  printf '\000\000\000\000\000\000\000\000\000\000\000\000' | cmp --bytes=12 --ignore-initial=1116:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.ext2 -
+elif [ "{{ FORMAT }}" = ext4 ]; then
+  printf '\123\357' | cmp --bytes=2 --ignore-initial=1080:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.ext4 -
+  printf '\074\020\000\000\302\042\000\000\153\004\000\000' | cmp --bytes=12 --ignore-initial=1116:0 ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.ext4 -
+
+  [ "$(/sbin/blkid --match-tag UUID --output value ./cache/mmdebstrap-{{ DIST }}-{{ VARIANT }}.ext4)" = "$(uuidgen --sha1 --namespace="$(uuidgen --sha1 --namespace='@dns' --name mister-muffin.de)" --name $SOURCE_DATE_EPOCH)" ]
 else
-	echo "unknown format: {{ FORMAT }}" >&2
-	exit 1
+  echo "unknown format: {{ FORMAT }}" >&2
+  exit 1
 fi

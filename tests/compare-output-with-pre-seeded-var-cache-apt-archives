@@ -7,21 +7,21 @@ set -eu
 export LC_ALL=C.UTF-8
 export SOURCE_DATE_EPOCH={{ SOURCE_DATE_EPOCH }}
 if [ ! -e /mmdebstrap-testenv ]; then
-	echo "this test requires the cache directory to be mounted on /mnt and should only be run inside a container" >&2
-	exit 1
+  echo "this test requires the cache directory to be mounted on /mnt and should only be run inside a container" >&2
+  exit 1
 fi
 tmpdir=$(mktemp -d)
 trap 'rm -f "$tmpdir"/*.deb /tmp/orig.tar /tmp/test1.tar /tmp/test2.tar; rmdir "$tmpdir"' EXIT INT TERM
 
 include="--include=doc-debian"
 if [ "{{ VARIANT }}" = "custom" ]; then
-	include="$include,base-files,base-passwd,coreutils,dash,diffutils,dpkg,libc-bin,sed"
+  include="$include,base-files,base-passwd,coreutils,dash,diffutils,dpkg,libc-bin,sed"
 fi
 {{ CMD }} $include --mode={{ MODE }} --variant={{ VARIANT }} \
-	--setup-hook='mkdir -p "$1"/var/cache/apt/archives/partial' \
-	--setup-hook='touch "$1"/var/cache/apt/archives/lock' \
-	--setup-hook='chmod 0640 "$1"/var/cache/apt/archives/lock' \
-	{{ DIST }} - {{ MIRROR }} > /tmp/orig.tar
+  --setup-hook='mkdir -p "$1"/var/cache/apt/archives/partial' \
+  --setup-hook='touch "$1"/var/cache/apt/archives/lock' \
+  --setup-hook='chmod 0640 "$1"/var/cache/apt/archives/lock' \
+  {{ DIST }} - {{ MIRROR }} >/tmp/orig.tar
 # somehow, when trying to create a tarball from the 9p mount, tar throws the
 # following error: tar: ./doc-debian_6.4_all.deb: File shrank by 132942 bytes; padding with zeros
 # to reproduce, try: tar --directory /mnt/cache/debian/pool/main/d/doc-debian/ --create --file - . | tar --directory /tmp/ --extract --file -
@@ -30,15 +30,15 @@ fi
 # another reason to copy the files into a new directory is, that we can use shell globs
 cp /mnt/cache/debian/pool/main/b/busybox/busybox_*"_{{ HOSTARCH }}.deb" /mnt/cache/debian/pool/main/a/apt/apt_*"_{{ HOSTARCH }}.deb" "$tmpdir"
 {{ CMD }} $include --mode={{ MODE }} --variant={{ VARIANT }} \
-	--setup-hook='mkdir -p "$1"/var/cache/apt/archives/partial' \
-	--setup-hook='sync-in "'"$tmpdir"'" /var/cache/apt/archives/partial' \
-	{{ DIST }} - {{ MIRROR }} > /tmp/test1.tar
+  --setup-hook='mkdir -p "$1"/var/cache/apt/archives/partial' \
+  --setup-hook='sync-in "'"$tmpdir"'" /var/cache/apt/archives/partial' \
+  {{ DIST }} - {{ MIRROR }} >/tmp/test1.tar
 cmp /tmp/orig.tar /tmp/test1.tar
 {{ CMD }} $include --mode={{ MODE }} --variant={{ VARIANT }} \
-	--customize-hook='touch "$1"/var/cache/apt/archives/partial' \
-	--setup-hook='mkdir -p "$1"/var/cache/apt/archives/' \
-	--setup-hook='sync-in "'"$tmpdir"'" /var/cache/apt/archives/' \
-	--setup-hook='chmod 0755 "$1"/var/cache/apt/archives/' \
-	--customize-hook='find "'"$tmpdir"'" -type f -exec md5sum "{}" \; | sed "s|"'"$tmpdir"'"|$1/var/cache/apt/archives|" | md5sum --check' \
-	{{ DIST }} - {{ MIRROR }} > /tmp/test2.tar
+  --customize-hook='touch "$1"/var/cache/apt/archives/partial' \
+  --setup-hook='mkdir -p "$1"/var/cache/apt/archives/' \
+  --setup-hook='sync-in "'"$tmpdir"'" /var/cache/apt/archives/' \
+  --setup-hook='chmod 0755 "$1"/var/cache/apt/archives/' \
+  --customize-hook='find "'"$tmpdir"'" -type f -exec md5sum "{}" \; | sed "s|"'"$tmpdir"'"|$1/var/cache/apt/archives|" | md5sum --check' \
+  {{ DIST }} - {{ MIRROR }} >/tmp/test2.tar
 cmp /tmp/orig.tar /tmp/test2.tar

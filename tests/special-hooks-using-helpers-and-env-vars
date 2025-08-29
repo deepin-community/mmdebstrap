@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 export LC_ALL=C.UTF-8
-cat << 'SCRIPT' > /tmp/script.sh
+cat <<'SCRIPT' >/tmp/script.sh
 #!/bin/sh
 set -eu
 echo "MMDEBSTRAP_APT_CONFIG $MMDEBSTRAP_APT_CONFIG"
@@ -21,11 +21,11 @@ rm test
 SCRIPT
 chmod +x /tmp/script.sh
 {{ CMD }} --mode=root --variant=apt \
-	--setup-hook=/tmp/script.sh \
-	--extract-hook=/tmp/script.sh \
-	--essential-hook=/tmp/script.sh \
-	--customize-hook=/tmp/script.sh \
-	{{ DIST }} /tmp/debian-chroot {{ MIRROR }}
+  --setup-hook=/tmp/script.sh \
+  --extract-hook=/tmp/script.sh \
+  --essential-hook=/tmp/script.sh \
+  --customize-hook=/tmp/script.sh \
+  {{ DIST }} /tmp/debian-chroot {{ MIRROR }}
 printf "setup\nextract\nessential\ncustomize\n" | diff -u - /tmp/hooks
 rm /tmp/script.sh /tmp/hooks
 rm -r /tmp/debian-chroot

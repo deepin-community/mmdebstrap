@@ -2,30 +2,30 @@
 set -eu
 export LC_ALL=C.UTF-8
 trap "rm -rf /tmp/debian-chroot; rm -f /tmp/sources.list /tmp/deb822.sources" EXIT INT TERM
-cat << SOURCES > /tmp/deb822.sources
+cat <<SOURCES >/tmp/deb822.sources
 Types: deb
 URIs: {{ MIRROR }}1
 Suites: {{ DIST }}
 Components: main
 SOURCES
-echo "deb {{ MIRROR }}2 {{ DIST }} main" > /tmp/sources.list
+echo "deb {{ MIRROR }}2 {{ DIST }} main" >/tmp/sources.list
 echo "deb {{ MIRROR }}3 {{ DIST }} main" \
-	| {{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} \
-		/tmp/debian-chroot \
-		/tmp/deb822.sources \
-		{{ MIRROR }}4 \
-		- \
-		"deb {{ MIRROR }}5 {{ DIST }} main" \
-		{{ MIRROR }}6 \
-		/tmp/sources.list
+  | {{ CMD }} --mode={{ MODE }} --variant=apt {{ DIST }} \
+    /tmp/debian-chroot \
+    /tmp/deb822.sources \
+    {{ MIRROR }}4 \
+    - \
+    "deb {{ MIRROR }}5 {{ DIST }} main" \
+    {{ MIRROR }}6 \
+    /tmp/sources.list
 test ! -e /tmp/debian-chroot/etc/apt/sources.list
-cat << SOURCES | cmp /tmp/debian-chroot/etc/apt/sources.list.d/0000deb822.sources -
+cat <<SOURCES | cmp /tmp/debian-chroot/etc/apt/sources.list.d/0000deb822.sources -
 Types: deb
 URIs: {{ MIRROR }}1
 Suites: {{ DIST }}
 Components: main
 SOURCES
-cat << SOURCES | cmp /tmp/debian-chroot/etc/apt/sources.list.d/0001main.list -
+cat <<SOURCES | cmp /tmp/debian-chroot/etc/apt/sources.list.d/0001main.list -
 deb {{ MIRROR }}4 {{ DIST }} main
 
 deb {{ MIRROR }}3 {{ DIST }} main
@@ -36,10 +36,10 @@ deb {{ MIRROR }}6 {{ DIST }} main
 SOURCES
 echo "deb {{ MIRROR }}2 {{ DIST }} main" | cmp /tmp/debian-chroot/etc/apt/sources.list.d/0002sources.list -
 tar -C /tmp/debian-chroot --one-file-system -c . \
-	| {
-		tar -t \
-			| grep -v "^./etc/apt/sources.list.d/0000deb822.sources$" \
-			| grep -v "^./etc/apt/sources.list.d/0001main.list$" \
-			| grep -v "^./etc/apt/sources.list.d/0002sources.list";
-		printf "./etc/apt/sources.list\n";
-	} | sort | diff -u tar1.txt -
+  | {
+    tar -t \
+      | grep -v "^./etc/apt/sources.list.d/0000deb822.sources$" \
+      | grep -v "^./etc/apt/sources.list.d/0001main.list$" \
+      | grep -v "^./etc/apt/sources.list.d/0002sources.list"
+    printf "./etc/apt/sources.list\n"
+  } | sort | diff -u tar1.txt -

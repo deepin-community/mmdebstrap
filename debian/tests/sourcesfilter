@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+
+from aptsources.sourceslist import SourcesList, Deb822SourceEntry
+import apt_pkg
+import glob
+import os.path
+import sys
+import os
+
+
+def main(rootfs):
+    sources = SourcesList(False, deb822=True)
+
+    dbglvl = os.environ.get("MMDEBSTRAP_VERBOSITY", "-1")
+    try:
+        dbglvl = int(dbglvl)
+    except ValueError:
+        dbglvl = -1
+    if dbglvl >= 2:
+        print("before:", file=sys.stderr)
+        for s in sources.list:
+            print(s.str(), end="", file=sys.stderr)
+
+    os.makedirs(rootfs + "/etc/apt/sources.list.d", exist_ok=True)
+
+    # remove all the things we do not want and change components and uri
+    for s in list(sources):
+        # since we put everything into a single output file, only one-line
+        # format is supported for now
+        assert not isinstance(s, Deb822SourceEntry), s
+        s.file = rootfs + s.file
+        # if it's a local file:// repo, don't mangle it
+        if s.uri.startswith("file://"):
+            continue
+        # remove debug packages
+        if s.uri.endswith("/debian-debug"):
+            sources.remove(s)
+            continue
+        # only allow main
+        s.comps = [c for c in s.comps if c in ["main"]]
+        # remove sources with empty components list
+        if not s.comps:
+            sources.remove(s)
+            continue
+        # remove deb-src entries
+        if s.type == "deb-src":
+            sources.remove(s)
+            continue
+        # translate uri to our proxy on 127.0.0.1
+        s.uri = "http://127.0.0.1/debian"
+
+    # remove duplicates
+    # we cannot use set() because order must be preserved
+    seen = set()
+    for s in list(sources):
+        if s.str() in seen:
+            sources.remove(s)
+            continue
+        seen.add(s.str())
+
+    if dbglvl >= 2:
+        print("after:", file=sys.stderr)
+        for s in sources.list:
+            print(s.str(), end="", file=sys.stderr)
+
+    # we want to append to existing files, so backup the files which would
+    # otherwise be overwritten by sources.save()
+    files_to_backup = {}
+    for s in sources.list:
+        if os.path.isfile(s.file):
+            files_to_backup[s.file] = b""
+
+    for fname in files_to_backup:
+        with open(fname, "rb") as f:
+            files_to_backup[fname] = f.read()
+
+    sources.save()
+
+    # now prepend the original content
+    for fname in files_to_backup:
+        with open(fname, "rb") as f:
+            updated_content = f.read()
+        with open(fname, "wb") as f:
+            f.write(files_to_backup[fname] + b"\n" + updated_content)
+
+    # append apt preferences verbatim
+    for pref in glob.glob("/etc/apt/preferences.d/*"):
+        if not os.path.isfile(pref):
+            continue
+        os.makedirs(os.path.dirname(rootfs + pref), exist_ok=True)
+        with open(pref) as fin, open(rootfs + pref, "a") as fout:
+            fout.write("\n")
+            for line in fin:
+                fout.write(line)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1])

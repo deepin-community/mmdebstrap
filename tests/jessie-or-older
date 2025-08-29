@@ -9,14 +9,14 @@ trap "rm -f /tmp/debian-chroot-{{ MODE }}.tar /tmp/debian-chroot-root-normal.tar
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" >/dev/null 2>&1; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
 MMTARFILTER=
@@ -24,19 +24,20 @@ MMTARFILTER=
 [ -x ./tarfilter ] && MMTARFILTER=./tarfilter
 
 filter() {
-	"$MMTARFILTER" \
-		--path-exclude=/usr/bin/uncompress \
-		--path-exclude=/var/cache/debconf/config.dat-old \
-		--path-exclude=/var/cache/debconf/templates.dat-old \
-		--path-exclude=/var/lib/dpkg/available \
-		--path-exclude=/var/lib/dpkg/diversions \
-		--path-exclude=/var/lib/dpkg/cmethopt \
-		--path-exclude=/var/lib/dpkg/status-old \
-		--path-exclude=/var/lib/shells.state
+  "$MMTARFILTER" \
+    --path-exclude=/usr/bin/uncompress \
+    --path-exclude=/var/cache/debconf/config.dat-old \
+    --path-exclude=/var/cache/debconf/templates.dat-old \
+    --path-exclude=/var/lib/dpkg/available \
+    --path-exclude=/var/lib/dpkg/diversions \
+    --path-exclude=/var/lib/dpkg/diversions-old \
+    --path-exclude=/var/lib/dpkg/cmethopt \
+    --path-exclude=/var/lib/dpkg/status-old \
+    --path-exclude=/var/lib/shells.state
 }
 
 # base for comparison without jessie-or-older hook
-{{ CMD }} --mode=root --variant={{ VARIANT }} {{ DIST }} - {{ MIRROR }} > /tmp/debian-chroot-root-normal.tar
+{{ CMD }} --mode=root --variant={{ VARIANT }} {{ DIST }} - {{ MIRROR }} >/tmp/debian-chroot-root-normal.tar
 
-$prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} --hook-dir=./hooks/jessie-or-older {{ DIST }} - {{ MIRROR }} | filter > /tmp/debian-chroot-{{ MODE }}.tar
-filter < /tmp/debian-chroot-root-normal.tar | cmp - /tmp/debian-chroot-{{ MODE }}.tar
+$prefix {{ CMD }} --mode={{ MODE }} --variant={{ VARIANT }} --hook-dir=./hooks/jessie-or-older {{ DIST }} - {{ MIRROR }} | filter >/tmp/debian-chroot-{{ MODE }}.tar
+filter </tmp/debian-chroot-root-normal.tar | cmp - /tmp/debian-chroot-{{ MODE }}.tar

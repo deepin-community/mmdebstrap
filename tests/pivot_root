@@ -6,49 +6,49 @@ trap "rm -f /tmp/chroot1.tar /tmp/chroot2.tar /tmp/chroot3.tar /tmp/mmdebstrap" 
 
 prefix=
 if [ "$(id -u)" -eq 0 ] && [ "{{ MODE }}" != "root" ] && [ "{{ MODE }}" != "auto" ]; then
-	if ! id "${SUDO_USER:-user}" 2>/dev/null; then
-		if [ ! -e /mmdebstrap-testenv ]; then
-			echo "this test modifies the system and should only be run inside a container" >&2
-			exit 1
-		fi
-		useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
-	fi
-	prefix="runuser -u ${SUDO_USER:-user} --"
+  if ! id "${SUDO_USER:-user}" 2>/dev/null; then
+    if [ ! -e /mmdebstrap-testenv ]; then
+      echo "this test modifies the system and should only be run inside a container" >&2
+      exit 1
+    fi
+    useradd --home-dir "/home/${SUDO_USER:-user}" --create-home "${SUDO_USER:-user}"
+  fi
+  prefix="runuser -u ${SUDO_USER:-user} --"
 fi
 
 $prefix {{ CMD }} --mode={{ MODE }} --variant=apt \
-	--include=mount \
-	{{ DIST }} /tmp/chroot1.tar {{ MIRROR }}
+  --include=mount,perl \
+  {{ DIST }} /tmp/chroot1.tar {{ MIRROR }}
 
 if [ {{ MODE }} = "unshare" ]; then
-	# calling pivot_root in root mode does not work for mysterious reasons:
-	# pivot_root: failed to change root from `.' to `mnt': Invalid argument
-	$prefix {{ CMD }} --mode={{ MODE }} --variant=apt --include=mount \
-		--customize-hook='mkdir -p "$1/mnt" "$1/oldroot"' \
-		--customize-hook='[ ! -e /usr/bin/mmdebstrap ] || cp -aT /usr/bin/mmdebstrap "$1/usr/bin/mmdebstrap"' \
-		--customize-hook='[ ! -e ./mmdebstrap ] || cp -aT ./mmdebstrap "$1/mnt/mmdebstrap"' \
-		--customize-hook='mount -o rbind "$1" /mnt && cd /mnt && /sbin/pivot_root . oldroot' \
-		--customize-hook='unshare -U echo nested unprivileged unshare' \
-		--customize-hook='env --chdir=/mnt {{ CMD }} --mode=unshare --variant=apt --include=mount {{ DIST }} /tmp/chroot3.tar {{ MIRROR }}' \
-		--customize-hook='copy-out /tmp/chroot3.tar /tmp' \
-		--customize-hook='rm -f "/usr/bin/mmdebstrap" "/mnt/mmdebstrap"' \
-		--customize-hook='umount -l oldroot sys' \
-		--customize-hook='rmdir /oldroot' \
-		{{ DIST }} /tmp/chroot2.tar {{ MIRROR }}
+  # calling pivot_root in root mode does not work for mysterious reasons:
+  # pivot_root: failed to change root from `.' to `mnt': Invalid argument
+  $prefix {{ CMD }} --mode={{ MODE }} --variant=apt --include=mount,perl \
+    --customize-hook='mkdir -p "$1/mnt" "$1/oldroot"' \
+    --customize-hook='[ ! -e /usr/bin/mmdebstrap ] || cp -aT /usr/bin/mmdebstrap "$1/usr/bin/mmdebstrap"' \
+    --customize-hook='[ ! -e ./mmdebstrap ] || cp -aT ./mmdebstrap "$1/mnt/mmdebstrap"' \
+    --customize-hook='mount -o rbind "$1" /mnt && cd /mnt && /sbin/pivot_root . oldroot' \
+    --customize-hook='unshare -U echo nested unprivileged unshare' \
+    --customize-hook='env --chdir=/mnt {{ CMD }} --mode=unshare --variant=apt --include=mount,perl {{ DIST }} /tmp/chroot3.tar {{ MIRROR }}' \
+    --customize-hook='copy-out /tmp/chroot3.tar /tmp' \
+    --customize-hook='rm -f "/usr/bin/mmdebstrap" "/mnt/mmdebstrap"' \
+    --customize-hook='umount -l oldroot sys' \
+    --customize-hook='rmdir /oldroot' \
+    {{ DIST }} /tmp/chroot2.tar {{ MIRROR }}
 
-		cmp /tmp/chroot1.tar /tmp/chroot2.tar || diffoscope /tmp/chroot1.tar /tmp/chroot2.tar
-		cmp /tmp/chroot1.tar /tmp/chroot3.tar || diffoscope /tmp/chroot1.tar /tmp/chroot3.tar
-		rm /tmp/chroot2.tar /tmp/chroot3.tar
+  cmp /tmp/chroot1.tar /tmp/chroot2.tar || diffoscope /tmp/chroot1.tar /tmp/chroot2.tar
+  cmp /tmp/chroot1.tar /tmp/chroot3.tar || diffoscope /tmp/chroot1.tar /tmp/chroot3.tar
+  rm /tmp/chroot2.tar /tmp/chroot3.tar
 fi
 
-$prefix {{ CMD }} --mode={{ MODE }} --variant=apt --include=mount \
-	--customize-hook='mkdir -p "$1/mnt"' \
-	--customize-hook='[ ! -e /usr/bin/mmdebstrap ] || cp -aT /usr/bin/mmdebstrap "$1/usr/bin/mmdebstrap"' \
-	--customize-hook='[ ! -e ./mmdebstrap ] || cp -aT ./mmdebstrap "$1/mnt/mmdebstrap"' \
-	--chrooted-customize-hook='env --chdir=/mnt {{ CMD }} --mode=unshare --variant=apt --include=mount {{ DIST }} /tmp/chroot3.tar {{ MIRROR }}' \
-	--customize-hook='copy-out /tmp/chroot3.tar /tmp' \
-	--customize-hook='rm -f "$1/usr/bin/mmdebstrap" "$1/mnt/mmdebstrap"' \
-	{{ DIST }} /tmp/chroot2.tar {{ MIRROR }}
+$prefix {{ CMD }} --mode={{ MODE }} --variant=apt --include=mount,perl \
+  --customize-hook='mkdir -p "$1/mnt"' \
+  --customize-hook='[ ! -e /usr/bin/mmdebstrap ] || cp -aT /usr/bin/mmdebstrap "$1/usr/bin/mmdebstrap"' \
+  --customize-hook='[ ! -e ./mmdebstrap ] || cp -aT ./mmdebstrap "$1/mnt/mmdebstrap"' \
+  --chrooted-customize-hook='env --chdir=/mnt {{ CMD }} --mode=unshare --variant=apt --include=mount,perl {{ DIST }} /tmp/chroot3.tar {{ MIRROR }}' \
+  --customize-hook='copy-out /tmp/chroot3.tar /tmp' \
+  --customize-hook='rm -f "$1/usr/bin/mmdebstrap" "$1/mnt/mmdebstrap"' \
+  {{ DIST }} /tmp/chroot2.tar {{ MIRROR }}
 
 cmp /tmp/chroot1.tar /tmp/chroot2.tar || diffoscope /tmp/chroot1.tar /tmp/chroot2.tar
 cmp /tmp/chroot1.tar /tmp/chroot3.tar || diffoscope /tmp/chroot1.tar /tmp/chroot3.tar
